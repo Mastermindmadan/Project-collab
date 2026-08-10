@@ -50,6 +50,15 @@ const upload = multer({
   },
 });
 
+const handleDriveUploadSingle = (fieldName: string) => (req: Request, res: Response, next: any) => {
+  upload.single(fieldName)(req, res, (err: any) => {
+    if (err) {
+      return res.status(400).json({ success: false, message: err.message || 'File upload error' });
+    }
+    next();
+  });
+};
+
 function getFileType(mime: string): string {
   if (mime === 'application/pdf') return 'pdf';
   if (mime.includes('word')) return 'docx';
@@ -136,7 +145,7 @@ router.delete('/folders/:id', async (req: Request, res: Response) => {
 });
 
 // POST /api/drive/:projectId/files — upload file to drive (Cloudinary primary, local fallback)
-router.post('/:projectId/files', upload.single('file'), async (req: Request, res: Response) => {
+router.post('/:projectId/files', handleDriveUploadSingle('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
     const { projectId } = req.params;

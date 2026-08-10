@@ -38,7 +38,8 @@ export async function uploadLocalFileToCloudinary(
   } else if (mimeType.startsWith('video/') || mimeType.startsWith('audio/')) {
     resourceType = 'video';
   } else {
-    resourceType = 'raw';
+    // Using 'auto' enables Cloudinary to serve PDFs and office docs with proper inline preview headers
+    resourceType = 'auto';
   }
 
   try {

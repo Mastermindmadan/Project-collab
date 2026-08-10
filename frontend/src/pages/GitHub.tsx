@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   GitBranch, Github, GitCommit, Users, RefreshCw, ExternalLink,
   GitPullRequest, HelpCircle, ArrowUpRight, Sparkles, Brain,
-  ShieldCheck, Star, GitFork, AlertCircle, Loader2, Plus, X,
+  Star, GitFork, AlertCircle, Loader2, Plus, X,
   Link2, FolderOpen, CheckCircle2, Trash2
 } from 'lucide-react';
 import api from '../utils/api';

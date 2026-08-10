@@ -50,6 +50,15 @@ const upload = multer({
   },
 });
 
+const handleUploadSingle = (fieldName: string) => (req: Request, res: Response, next: any) => {
+  upload.single(fieldName)(req, res, (err: any) => {
+    if (err) {
+      return res.status(400).json({ success: false, message: err.message || 'File upload error' });
+    }
+    next();
+  });
+};
+
 function getFileType(mimetype: string): string {
   if (mimetype === 'application/pdf') return 'pdf';
   if (mimetype.includes('word')) return 'docx';
@@ -61,7 +70,7 @@ function getFileType(mimetype: string): string {
 }
 
 // POST /api/upload — Upload a file (Cloudinary primary, local disk fallback)
-router.post('/', upload.single('file'), async (req: Request, res: Response) => {
+router.post('/', handleUploadSingle('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
     const { projectId, category, description, uploadedById } = req.body;
@@ -156,7 +165,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 });
 
 // POST /api/upload/:id/version — Upload new version of existing doc
-router.post('/:id/version', upload.single('file'), async (req: Request, res: Response) => {
+router.post('/:id/version', handleUploadSingle('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
     const { uploadedById, notes } = req.body;
