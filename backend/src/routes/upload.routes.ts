@@ -3,15 +3,20 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { PrismaClient } from '@prisma/client';
+import {
+  isCloudinaryConfigured,
+  uploadLocalFileToCloudinary,
+  deleteFromCloudinary,
+} from '../utils/cloudinary';
 
 const router = Router();
 const prisma = new PrismaClient();
 
-// Ensure uploads directory exists
+// Ensure uploads directory exists for temp local storage
 const uploadsDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
-// Multer storage config
+// Multer storage config (temporary local storage before optional Cloudinary sync)
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadsDir),
   filename: (_req, file, cb) => {
@@ -35,7 +40,7 @@ const allowedMimes = [
 
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max limit
   fileFilter: (_req, file, cb) => {
     if (allowedMimes.includes(file.mimetype)) {
       cb(null, true);
@@ -55,17 +60,33 @@ function getFileType(mimetype: string): string {
   return 'other';
 }
 
-// POST /api/upload — Upload a file
+// POST /api/upload — Upload a file (Cloudinary primary, local disk fallback)
 router.post('/', upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
     const { projectId, category, description, uploadedById } = req.body;
     if (!projectId || !uploadedById) {
-      fs.unlinkSync(req.file.path);
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       return res.status(400).json({ success: false, message: 'projectId and uploadedById are required' });
     }
 
-    const fileUrl = `/uploads/${req.file.filename}`;
+    let fileUrl = `/uploads/${req.file.filename}`;
+    let storageProvider = 'local';
+
+    if (isCloudinaryConfigured()) {
+      try {
+        const cloudRes = await uploadLocalFileToCloudinary(
+          req.file.path,
+          'projectcollab/documents',
+          req.file.mimetype
+        );
+        fileUrl = cloudRes.url;
+        storageProvider = 'cloudinary';
+      } catch (cloudErr: any) {
+        console.warn('[Upload] Cloudinary upload failed, falling back to local file:', cloudErr.message);
+      }
+    }
+
     const document = await prisma.document.create({
       data: {
         name: req.file.originalname,
@@ -81,28 +102,51 @@ router.post('/', upload.single('file'), async (req: Request, res: Response) => {
       },
     });
 
-    res.json({ success: true, document });
+    res.json({ success: true, storageProvider, document });
+  } catch (err: any) {
+    if (req.file && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+    }
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// GET /api/upload/file/:filename — Serve/download file (redirects to Cloudinary if remote)
+router.get('/file/:filename', async (req: Request, res: Response) => {
+  try {
+    const doc = await prisma.document.findFirst({
+      where: {
+        OR: [
+          { fileUrl: { contains: req.params.filename } },
+          { name: req.params.filename },
+        ],
+      },
+    });
+
+    if (doc && (doc.fileUrl.startsWith('http://') || doc.fileUrl.startsWith('https://'))) {
+      return res.redirect(doc.fileUrl);
+    }
+
+    const filePath = path.join(uploadsDir, req.params.filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ success: false, message: 'File not found' });
+    res.download(filePath);
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// GET /api/upload/file/:filename — Serve/download file
-router.get('/file/:filename', (req: Request, res: Response) => {
-  const filePath = path.join(uploadsDir, req.params.filename);
-  if (!fs.existsSync(filePath)) return res.status(404).json({ success: false, message: 'File not found' });
-  res.download(filePath);
-});
-
-// DELETE /api/upload/:id — Delete document record
+// DELETE /api/upload/:id — Delete document record and underlying storage
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const doc = await prisma.document.findUnique({ where: { id: req.params.id } });
     if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
 
-    // Delete physical file
-    const filePath = path.join(uploadsDir, path.basename(doc.fileUrl));
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    if (doc.fileUrl.startsWith('http://') || doc.fileUrl.startsWith('https://')) {
+      await deleteFromCloudinary(doc.fileUrl);
+    } else {
+      const filePath = path.join(uploadsDir, path.basename(doc.fileUrl));
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
 
     await prisma.document.delete({ where: { id: req.params.id } });
     res.json({ success: true, message: 'Document deleted' });
@@ -120,7 +164,22 @@ router.post('/:id/version', upload.single('file'), async (req: Request, res: Res
     if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
 
     const newVersion = doc.version + 1;
-    const fileUrl = `/uploads/${req.file.filename}`;
+    let fileUrl = `/uploads/${req.file.filename}`;
+    let storageProvider = 'local';
+
+    if (isCloudinaryConfigured()) {
+      try {
+        const cloudRes = await uploadLocalFileToCloudinary(
+          req.file.path,
+          'projectcollab/documents',
+          req.file.mimetype
+        );
+        fileUrl = cloudRes.url;
+        storageProvider = 'cloudinary';
+      } catch (cloudErr: any) {
+        console.warn('[Upload Version] Cloudinary failed, fallback to local:', cloudErr.message);
+      }
+    }
 
     await prisma.docVersion.create({
       data: { documentId: doc.id, version: doc.version, fileUrl: doc.fileUrl, uploadedById, notes },
@@ -131,8 +190,11 @@ router.post('/:id/version', upload.single('file'), async (req: Request, res: Res
       data: { fileUrl, version: newVersion, fileSize: req.file.size, mimeType: req.file.mimetype, updatedAt: new Date() },
     });
 
-    res.json({ success: true, document: updated });
+    res.json({ success: true, storageProvider, document: updated });
   } catch (err: any) {
+    if (req.file && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+    }
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -151,3 +213,4 @@ router.get('/:id/versions', async (req: Request, res: Response) => {
 });
 
 export default router;
+

@@ -3,6 +3,11 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { PrismaClient } from '@prisma/client';
+import {
+  isCloudinaryConfigured,
+  uploadLocalFileToCloudinary,
+  deleteFromCloudinary,
+} from '../utils/cloudinary';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -17,7 +22,33 @@ const storage = multer.diskStorage({
     cb(null, `drive-${unique}${path.extname(file.originalname)}`);
   },
 });
-const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } });
+
+const driveAllowedMimes = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/msword',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+  'application/zip', 'application/x-zip-compressed',
+  'text/plain', 'text/csv',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'audio/mpeg', 'audio/wav', 'audio/ogg',
+  'video/mp4', 'video/webm',
+];
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max limit
+  fileFilter: (_req, file, cb) => {
+    if (driveAllowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`File type not allowed for Drive: ${file.mimetype}`));
+    }
+  },
+});
 
 function getFileType(mime: string): string {
   if (mime === 'application/pdf') return 'pdf';
@@ -104,17 +135,34 @@ router.delete('/folders/:id', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/drive/:projectId/files — upload file to drive
+// POST /api/drive/:projectId/files — upload file to drive (Cloudinary primary, local fallback)
 router.post('/:projectId/files', upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
     const { projectId } = req.params;
     const { folderId, uploadedById, description } = req.body;
 
+    let fileUrl = `/uploads/${req.file.filename}`;
+    let storageProvider = 'local';
+
+    if (isCloudinaryConfigured()) {
+      try {
+        const cloudRes = await uploadLocalFileToCloudinary(
+          req.file.path,
+          'projectcollab/drive',
+          req.file.mimetype
+        );
+        fileUrl = cloudRes.url;
+        storageProvider = 'cloudinary';
+      } catch (cloudErr: any) {
+        console.warn('[Drive Upload] Cloudinary upload failed, falling back to local file:', cloudErr.message);
+      }
+    }
+
     const file = await prisma.driveFile.create({
       data: {
         name: req.file.originalname,
-        fileUrl: `/uploads/${req.file.filename}`,
+        fileUrl,
         fileType: getFileType(req.file.mimetype),
         fileSize: req.file.size,
         mimeType: req.file.mimetype,
@@ -126,8 +174,11 @@ router.post('/:projectId/files', upload.single('file'), async (req: Request, res
       include: { uploadedBy: { select: { name: true, avatarUrl: true } } },
     });
 
-    res.json({ success: true, file });
+    res.json({ success: true, storageProvider, file });
   } catch (err: any) {
+    if (req.file && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+    }
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -137,8 +188,14 @@ router.delete('/files/:id', async (req: Request, res: Response) => {
   try {
     const file = await prisma.driveFile.findUnique({ where: { id: req.params.id } });
     if (!file) return res.status(404).json({ success: false, message: 'File not found' });
-    const filePath = path.join(uploadsDir, path.basename(file.fileUrl));
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+
+    if (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://')) {
+      await deleteFromCloudinary(file.fileUrl);
+    } else {
+      const filePath = path.join(uploadsDir, path.basename(file.fileUrl));
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+
     await prisma.driveFile.delete({ where: { id: req.params.id } });
     res.json({ success: true, message: 'File deleted' });
   } catch (err: any) {
@@ -146,11 +203,16 @@ router.delete('/files/:id', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/drive/files/:id/download — download file
+// GET /api/drive/files/:id/download — download file (redirects to Cloudinary if remote)
 router.get('/files/:id/download', async (req: Request, res: Response) => {
   try {
     const file = await prisma.driveFile.findUnique({ where: { id: req.params.id } });
     if (!file) return res.status(404).json({ success: false, message: 'File not found' });
+
+    if (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://')) {
+      return res.redirect(file.fileUrl);
+    }
+
     const filePath = path.join(uploadsDir, path.basename(file.fileUrl));
     if (!fs.existsSync(filePath)) return res.status(404).json({ success: false, message: 'Physical file not found' });
     res.download(filePath, file.name);
@@ -160,3 +222,4 @@ router.get('/files/:id/download', async (req: Request, res: Response) => {
 });
 
 export default router;
+
