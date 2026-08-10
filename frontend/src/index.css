@@ -1,0 +1,349 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Dark mode is the default theme */
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 6.4%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 48%;
+    --radius: 0.75rem;
+    --panel-bg: rgba(12, 17, 29, 0.85);
+    --card-bg: rgba(12, 17, 29, 0.55);
+    --card-hover-border: #334155;
+    --panel-border: rgba(30, 41, 59, 0.8);
+    --input-bg: rgba(3, 7, 18, 0.6);
+    --skeleton-bg: hsl(210, 30%, 20%);
+    --skeleton-shine: hsl(210, 30%, 25%);
+  }
+
+
+
+  .light {
+    color-scheme: light;
+    --background: 210 40% 98%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 94%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 94%;
+    --muted-foreground: 215.4 16.3% 45.0%;
+    --accent: 210 40% 94%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --border: 214.3 31.8% 88%;
+    --input: 214.3 31.8% 88%;
+    --ring: 221.2 83.2% 53.3%;
+    --panel-bg: rgba(255, 255, 255, 0.9);
+    --card-bg: rgba(255, 255, 255, 0.75);
+    --card-hover-border: #cbd5e1;
+    --panel-border: rgba(226, 232, 240, 0.9);
+    --input-bg: rgba(248, 250, 252, 0.8);
+    --skeleton-bg: hsl(210, 30%, 92%);
+    --skeleton-shine: hsl(210, 30%, 97%);
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground font-sans antialiased selection:bg-primary selection:text-primary-foreground overflow-x-hidden transition-colors duration-300;
+  }
+
+  /* Dark mode background gradient (default) */
+  html:not(.light) body {
+    background-image:
+      radial-gradient(at 0% 0%, rgba(29, 78, 216, 0.15) 0px, transparent 50%),
+      radial-gradient(at 50% 0%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, rgba(147, 51, 234, 0.12) 0px, transparent 50%);
+    background-attachment: fixed;
+  }
+
+  /* Light mode background gradient */
+  html.light body {
+    background-image:
+      radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.08) 0px, transparent 50%),
+      radial-gradient(at 50% 0%, rgba(99, 102, 241, 0.04) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, rgba(168, 85, 247, 0.06) 0px, transparent 50%);
+    background-attachment: fixed;
+  }
+}
+
+/* Glassmorphism Classes */
+.glass-panel {
+  background-color: var(--panel-bg);
+  border-color: var(--panel-border);
+  @apply backdrop-blur-md border shadow-xl transition-all duration-300;
+}
+
+.glass-card {
+  background-color: var(--card-bg);
+  border-color: var(--panel-border);
+  @apply backdrop-blur-sm border transition-all duration-300;
+}
+.glass-card:hover {
+  border-color: var(--card-hover-border);
+}
+
+.glass-input {
+  background-color: var(--input-bg);
+  border-color: var(--panel-border);
+  @apply border focus:border-primary/50 focus:ring-1 focus:ring-primary/30 outline-none rounded-lg px-4 py-2 text-sm text-foreground transition-all;
+}
+
+/* Glowing Neon Elements */
+.glow-primary {
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.35);
+}
+
+.glow-emerald {
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.25);
+}
+
+.glow-amber {
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.25);
+}
+
+.glow-red {
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.25);
+}
+
+/* Custom Scrollbar for sleek aesthetic */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-800 rounded-full hover:bg-slate-700 transition-colors;
+}
+
+/* Micro-animations */
+@keyframes pulse-ring {
+  0% { transform: scale(0.95); opacity: 0.5; }
+  50% { transform: scale(1.1); opacity: 0.8; }
+  100% { transform: scale(0.95); opacity: 0.5; }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2s infinite ease-in-out;
+}
+
+/* Light Mode Readability & Clean Premium Contrast Rules */
+.light {
+  color-scheme: light;
+}
+
+.light h1, .light h2, .light h3, .light h4, .light h5, .light h6 {
+  color: #0f172a !important;
+}
+
+.light .text-white {
+  color: #0f172a !important;
+}
+
+.light .text-slate-400 {
+  color: #475569 !important; /* Sharp readable slate gray */
+}
+
+.light .text-slate-500 {
+  color: #64748b !important;
+}
+
+.light .text-slate-600 {
+  color: #475569 !important;
+}
+
+.light .text-slate-300,
+.light .text-slate-200,
+.light .text-slate-100 {
+  color: #1e293b !important;
+}
+
+.light .glass-panel {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(226, 232, 240, 0.95) !important;
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.04), 0 4px 12px -2px rgba(0, 0, 0, 0.02) !important;
+}
+
+.light .glass-card {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  border-color: rgba(226, 232, 240, 0.9) !important;
+  box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.03) !important;
+}
+.light .glass-card:hover {
+  border-color: rgba(203, 213, 225, 1) !important;
+  box-shadow: 0 6px 20px -2px rgba(0, 0, 0, 0.06) !important;
+}
+
+.light .glass-input {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+.light .glass-input::placeholder {
+  color: #64748b !important;
+}
+
+.light .bg-slate-950,
+.light .bg-slate-900,
+.light .bg-slate-900\/60,
+.light .bg-slate-900\/80,
+.light .bg-slate-900\/50,
+.light .bg-slate-950\/80,
+.light .bg-slate-950\/70,
+.light .bg-\[\#0c111d\],
+.light .bg-\[\#030712\] {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+}
+
+.light .bg-slate-800,
+.light .bg-slate-800\/60,
+.light .bg-slate-800\/80,
+.light .bg-slate-800\/50 {
+  background-color: #f1f5f9 !important;
+}
+
+.light .border-slate-800,
+.light .border-slate-700,
+.light .border-slate-800\/80,
+.light .border-\[\#1e293b\] {
+  border-color: #e2e8f0 !important;
+}
+
+.light ::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+}
+
+/* Ensure buttons & badges with solid backgrounds maintain proper contrast */
+.light .bg-primary,
+.light .bg-blue-600,
+.light .bg-indigo-600,
+.light .bg-purple-600,
+.light .bg-emerald-600,
+.light .bg-rose-600,
+.light .bg-red-600 {
+  color: #ffffff !important;
+}
+.light .bg-primary *,
+.light .bg-blue-600 *,
+.light .bg-indigo-600 *,
+.light .bg-purple-600 *,
+.light .bg-emerald-600 *,
+.light .bg-rose-600 *,
+.light .bg-red-600 * {
+  color: inherit;
+}
+
+
+/* Micro-animations & Floating Background Effects */
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-18px) rotate(3deg); }
+}
+
+@keyframes float-reverse {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(20px) rotate(-3deg); }
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-float-slow {
+  animation: float-slow 7s infinite ease-in-out;
+}
+
+.animate-float-reverse {
+  animation: float-reverse 9s infinite ease-in-out;
+}
+
+.animate-spin-slow {
+  animation: spin-slow 35s linear infinite;
+}
+
+.light .bg-primary,
+.light .bg-blue-600,
+.light .bg-indigo-600,
+.light .bg-purple-600,
+.light .bg-emerald-600,
+.light .bg-rose-600,
+.light .bg-red-600 {
+  color: #ffffff !important;
+}
+.light .bg-primary *,
+.light .bg-blue-600 *,
+.light .bg-indigo-600 *,
+.light .bg-purple-600 *,
+.light .bg-emerald-600 *,
+.light .bg-rose-600 *,
+.light .bg-red-600 * {
+  color: inherit;
+}
+
+/* End of custom UI enhancements */
+
+/* Fade‑in animation for widgets */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.widget-fade { animation: fadeIn 0.35s ease-out; }
+
+/* Ripple effect for interactive buttons */
+.btn-ripple {
+  position: relative; overflow: hidden;
+}
+.btn-ripple::after {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  width: 0; height: 0; background: rgba(255,255,255,0.3);
+  border-radius: 50%; transform: translate(-50%,-50%);
+  transition: width 0.4s ease-out, height 0.4s ease-out;
+}
+.btn-ripple:active::after { width: 200px; height: 200px; }
+
+/* Skeleton loading placeholder */
+.skeleton {
+  display: inline-block; height: 1em; width: 100%;
+  background: var(--skeleton-bg); position: relative; overflow: hidden;
+}
+.skeleton::after {
+  content: ""; position: absolute; top: 0; left: -150%;
+  height: 100%; width: 150%;
+  background: linear-gradient(90deg, transparent, var(--skeleton-shine), transparent);
+  animation: loading 1.2s infinite;
+}
+@keyframes loading { 0% { left: -150%; } 50% { left: 100%; } 100% { left: 100%; } }
+
+/* Mobile‑first responsive tweaks */
+@media (max-width: 640px) {
+  .sidebar { display: none; }
+  .topbar { flex-direction: column; }
+}
+
+/* End of custom UI enhancements */

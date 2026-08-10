@@ -1,0 +1,78 @@
+# ============================================================
+# ROOT .gitignore — ProjectCollab AI
+# ============================================================
+
+# ── Dependencies ─────────────────────────────────────────────
+node_modules/
+**/node_modules/
+
+# ── Build / Compiled output ──────────────────────────────────
+dist/
+dist-ssr/
+build/
+**/dist/
+**/dist-ssr/
+**/build/
+
+# ── Environment variables (NEVER commit these) ───────────────
+.env
+.env.*
+!.env.example
+!.env.example.*
+backend/.env
+backend/.env.*
+!backend/.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# ── Uploaded files (local disk — ephemeral, not for git) ─────
+backend/uploads/
+
+# ── Prisma generated client (regenerated on deploy) ──────────
+backend/prisma/generated/
+
+# ── Local SQLite databases (never commit) ────────────────────
+backend/prisma/dev.db
+*.db
+
+# ── OS artifacts ─────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# ── Editor / IDE ─────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+
+# ── Coverage / Test output ────────────────────────────────────
+coverage/
+.nyc_output/
+**/coverage/
+
+# ── TypeScript cache ──────────────────────────────────────────
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# ── Package manager locks (keep package-lock, ignore yarn) ───
+yarn.lock
+
+# ── Misc ─────────────────────────────────────────────────────
+*.pem
+.cache/
+.parcel-cache/
+.temp/
+.tmp/
