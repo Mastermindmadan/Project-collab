@@ -1,68 +1,61 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["relationJoins"]
+}
+
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
-generator client {
-  provider = "prisma-client-js"
-  previewFeatures = ["relationJoins"]
-}
-
 model User {
-  id           String        @id @default(uuid())
-  email        String        @unique
-  passwordHash String
-  name         String
-  avatarUrl    String?
-  role         String        @default("STUDENT")
-  skills       String?       // JSON string array
-  bio          String?
-  github       String?
-  githubUsername String?
-  linkedin     String?
-  phone        String?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  
-  teamMembers  TeamMember[]
-  assignedTasks Task[]       @relation("AssignedTasks")
-  comments     TaskComment[]
-  activityLogs ActivityLog[]
-  notifications Notification[]
-  messages     Message[]
-  createdMeetings Meeting[]  @relation("CreatedMeetings")
-  documents    Document[]
-  tokens       Token[]
-  driveFiles   DriveFile[]
-  connectedRepos Repository[] @relation("UserConnectedRepos")
-}
-
-enum TokenType {
-  REFRESH
-  PASSWORD_RESET
+  id              String         @id @default(uuid())
+  email           String         @unique
+  passwordHash    String
+  name            String
+  avatarUrl       String?
+  role            String         @default("STUDENT")
+  skills          String?
+  bio             String?
+  github          String?
+  linkedin        String?
+  phone           String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  githubUsername  String?
+  activityLogs    ActivityLog[]
+  documents       Document[]
+  driveFiles      DriveFile[]
+  createdMeetings Meeting[]      @relation("CreatedMeetings")
+  messages        Message[]
+  notifications   Notification[]
+  connectedRepos  Repository[]   @relation("UserConnectedRepos")
+  assignedTasks   Task[]         @relation("AssignedTasks")
+  comments        TaskComment[]
+  teamMembers     TeamMember[]
+  tokens          Token[]
 }
 
 model Token {
   id        String    @id @default(uuid())
   token     String    @unique
   userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
   type      TokenType @default(REFRESH)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Team {
-  id          String       @id @default(uuid())
-  name        String
-  inviteCode  String       @unique
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  
-  members     TeamMember[]
-  projects    Project[]
-  messages    Message[]
+  id         String       @id @default(uuid())
+  name       String
+  inviteCode String       @unique
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  messages   Message[]
+  projects   Project[]
+  members    TeamMember[]
 }
 
 model TeamMember {
@@ -72,9 +65,8 @@ model TeamMember {
   role      String   @default("MEMBER")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, teamId])
 }
@@ -90,18 +82,17 @@ model Project {
   teamId       String
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
-
-  team         Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  milestones   Milestone[]
-  tasks        Task[]
-  messages     Message[]
-  documents    Document[]
   activityLogs ActivityLog[]
-  meetings     Meeting[]
-  gitAnalytics GitAnalytics?
-  driveFolders DriveFolder[]
+  documents    Document[]
   driveFiles   DriveFile[]
+  driveFolders DriveFolder[]
+  gitAnalytics GitAnalytics?
+  meetings     Meeting[]
+  messages     Message[]
+  milestones   Milestone[]
+  team         Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
   repositories Repository[]
+  tasks        Task[]
 }
 
 model Repository {
@@ -112,9 +103,8 @@ model Repository {
   fullPath          String
   connectedByUserId String
   createdAt         DateTime @default(now())
-
-  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  connectedBy User    @relation("UserConnectedRepos", fields: [connectedByUserId], references: [id], onDelete: Cascade)
+  connectedBy       User     @relation("UserConnectedRepos", fields: [connectedByUserId], references: [id], onDelete: Cascade)
+  project           Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, fullPath])
 }
@@ -128,17 +118,16 @@ model Milestone {
   status      String   @default("PENDING")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-
   project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   tasks       Task[]
 }
 
 model Task {
-  id           String       @id @default(uuid())
+  id           String        @id @default(uuid())
   title        String
   description  String?
-  status       String       @default("TODO")
-  priority     String       @default("LOW")
+  status       String        @default("TODO")
+  priority     String        @default("LOW")
   dueDate      DateTime?
   projectId    String
   assigneeId   String?
@@ -147,16 +136,14 @@ model Task {
   labels       String?
   timeEstimate Int?
   attachments  String?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-
-  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  assignee     User?        @relation("AssignedTasks", fields: [assigneeId], references: [id], onDelete: SetNull)
-  milestone    Milestone?   @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
-  parentTask   Task?        @relation("SubTasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
-  
-  subtasks     Task[]       @relation("SubTasks")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
   oldSubtasks  Subtask[]
+  assignee     User?         @relation("AssignedTasks", fields: [assigneeId], references: [id])
+  milestone    Milestone?    @relation(fields: [milestoneId], references: [id])
+  parentTask   Task?         @relation("SubTasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks     Task[]        @relation("SubTasks")
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   comments     TaskComment[]
 }
 
@@ -166,7 +153,6 @@ model Subtask {
   title       String
   isCompleted Boolean  @default(false)
   createdAt   DateTime @default(now())
-
   task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
 }
 
@@ -176,7 +162,6 @@ model TaskComment {
   userId    String
   content   String
   createdAt DateTime @default(now())
-
   task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
@@ -188,7 +173,6 @@ model Notification {
   message   String
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())
-
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
@@ -199,22 +183,20 @@ model ActivityLog {
   action    String
   metadata  String?
   createdAt DateTime @default(now())
-
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Meeting {
-  id          String   @id @default(uuid())
-  projectId   String
-  title       String
-  dateTime    DateTime
-  link        String
-  createdBy   String
-  createdAt   DateTime @default(now())
-
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  creator     User     @relation("CreatedMeetings", fields: [createdBy], references: [id])
+  id        String   @id @default(uuid())
+  projectId String
+  title     String
+  dateTime  DateTime
+  link      String
+  createdBy String
+  createdAt DateTime @default(now())
+  creator   User     @relation("CreatedMeetings", fields: [createdBy], references: [id])
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model Document {
@@ -232,10 +214,9 @@ model Document {
   version        Int          @default(1)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
-
+  versions       DocVersion[]
   project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   uploadedBy     User         @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
-  versions       DocVersion[]
 }
 
 model DocVersion {
@@ -246,7 +227,6 @@ model DocVersion {
   uploadedById String
   notes        String?
   createdAt    DateTime @default(now())
-
   document     Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
 }
 
@@ -259,35 +239,32 @@ model Message {
   type        String   @default("CHAT")
   attachments String?
   createdAt   DateTime @default(now())
-
-  sender      User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
   project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sender      User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
   team        Team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
 }
 
 model GitAnalytics {
-  id               String   @id @default(uuid())
-  projectId        String   @unique
-  commitsCount     Int      @default(0)
+  id               String    @id @default(uuid())
+  projectId        String    @unique
+  commitsCount     Int       @default(0)
   lastCommitTime   DateTime?
   contributionData String?
-  updatedAt        DateTime @updatedAt
-
-  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  updatedAt        DateTime  @updatedAt
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model DriveFolder {
-  id          String        @id @default(uuid())
-  name        String
-  projectId   String
-  parentId    String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-
-  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  parent      DriveFolder?  @relation("FolderTree", fields: [parentId], references: [id])
-  children    DriveFolder[] @relation("FolderTree")
-  files       DriveFile[]
+  id        String        @id @default(uuid())
+  name      String
+  projectId String
+  parentId  String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  files     DriveFile[]
+  parent    DriveFolder?  @relation("FolderTree", fields: [parentId], references: [id])
+  children  DriveFolder[] @relation("FolderTree")
+  project   Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model DriveFile {
@@ -304,8 +281,12 @@ model DriveFile {
   version      Int          @default(1)
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
-
+  folder       DriveFolder? @relation(fields: [folderId], references: [id])
   project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  folder       DriveFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
   uploadedBy   User         @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+}
+
+enum TokenType {
+  REFRESH
+  PASSWORD_RESET
 }
