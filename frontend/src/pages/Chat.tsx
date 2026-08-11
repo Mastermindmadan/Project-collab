@@ -138,13 +138,16 @@ export default function Chat() {
   // fully reset all chat state and re-fetch
   // ─────────────────────────────────────────────
   useEffect(() => {
-    // Tear down existing socket immediately
+    // Tear down existing socket immediately — MUST null out ref so the
+    // socket effect always creates a fresh, correctly-authenticated socket
+    // for the new account instead of re-using the stale disconnected one.
     if (socketRef.current) {
+      socketRef.current.removeAllListeners();
       socketRef.current.disconnect();
       socketRef.current = null;
     }
 
-    // Clear everything
+    // Clear everything so the previous account's data is never visible
     setChannels([]);
     setActiveTeamId(null);
     setMessages([]);
@@ -243,10 +246,12 @@ export default function Chat() {
   useEffect(() => {
     if (!accessToken || !activeTeamId) return;
 
-    const apiBaseUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:5000/api';
-    const socketUrl = apiBaseUrl.replace(/\/api\/?$/, '');
+    // Connect to the same origin — Vite proxy forwards /socket.io → backend:5000.
+    // In production, VITE_SOCKET_URL can be set to the backend host directly.
+    const socketUrl = import.meta.env.VITE_SOCKET_URL ?? window.location.origin;
 
-    // Create socket if not yet connected for this session
+    // Always create a fresh socket if none is alive (handles account switches
+    // where we nulled out socketRef in the accessToken effect above)
     if (!socketRef.current || !socketRef.current.connected) {
       const socket = io(socketUrl, {
         auth: { token: accessToken },
@@ -260,6 +265,7 @@ export default function Chat() {
         console.warn('Socket connection error:', err.message);
       });
     }
+
 
     const socket = socketRef.current;
 
@@ -282,9 +288,23 @@ export default function Chat() {
 
     // ── Event handlers for THIS team ──
     const onNewMessage = (data: any) => {
-      // Strict: only process if message belongs to current active team
-      if (data.teamId !== activeTeamId) return;
       const isOwn = data.senderId === user?.id;
+      const senderName = isOwn ? (user?.name ?? 'You') : (data.sender?.name ?? 'Member');
+
+      // Always update the sidebar channel preview for the relevant team
+      setChannels(prev => prev.map(ch =>
+        ch.id === data.teamId
+          ? {
+              ...ch,
+              lastMsg: `${senderName}: ${data.content}`,
+              // Increment unread badge for non-active teams
+              unread: data.teamId !== activeTeamId ? (ch.unread ?? 0) + 1 : 0,
+            }
+          : ch
+      ));
+
+      // Only append message to the view if it belongs to the active team
+      if (data.teamId !== activeTeamId) return;
 
       setMessages(prev => {
         // Remove matching optimistic message
@@ -297,7 +317,7 @@ export default function Chat() {
         return [...withoutOpt, {
           id: data.id,
           senderId: data.senderId,
-          senderName: isOwn ? (user?.name ?? 'You') : (data.sender?.name ?? 'Member'),
+          senderName,
           senderInitials: isOwn
             ? makeInitials(user?.name ?? 'ME')
             : makeInitials(data.sender?.name ?? 'MB'),
@@ -437,6 +457,10 @@ export default function Chat() {
   // ─────────────────────────────────────────────
   const handleSwitchTeam = (teamId: string) => {
     if (teamId === activeTeamId) return;
+    // Clear unread badge for the team being switched to
+    setChannels(prev => prev.map(ch =>
+      ch.id === teamId ? { ...ch, unread: 0 } : ch
+    ));
     setActiveTeamId(teamId);
   };
 
