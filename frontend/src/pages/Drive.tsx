@@ -92,8 +92,14 @@ export default function Drive() {
     loadDrive(selectedProject, currentFolderId);
   };
 
+  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+
+  const previewFile = (file: DriveFile) => {
+    window.open(`${apiBase}/files/${file.id}/preview`, '_blank');
+  };
+
   const downloadFile = (file: DriveFile) => {
-    window.open(`${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000'}/api/drive/files/${file.id}/download`, '_blank');
+    window.open(`${apiBase}/files/${file.id}/download`, '_blank');
   };
 
   const displayFiles = searchResults !== null ? searchResults : files;
@@ -210,15 +216,20 @@ export default function Drive() {
               <div className="space-y-2">
                 {displayFiles.map(f => (
                   <div key={f.id} className="flex items-center gap-4 p-3 glass-card rounded-xl hover:border-primary/30 transition-all group">
-                    <div className="flex-shrink-0">{fileIcon(f.fileType)}</div>
+                    <div className="flex-shrink-0 cursor-pointer" onClick={() => previewFile(f)}>{fileIcon(f.fileType)}</div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-foreground truncate">{f.name}</p>
+                      <button onClick={() => previewFile(f)} className="text-sm font-bold text-foreground truncate hover:text-primary transition-colors text-left block w-full">
+                        {f.name}
+                      </button>
                       <p className="text-xs text-muted-foreground">
                         {formatSize(f.fileSize)} · {f.uploadedBy?.name} · {dayjs(f.createdAt).format('MMM D, YYYY')}
                         {f.folder && <span> · in {f.folder.name}</span>}
                       </p>
                     </div>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => previewFile(f)} title="Preview File" className="px-2 py-1 text-xs bg-secondary hover:bg-primary/20 hover:text-primary rounded-lg transition-colors font-medium">
+                        Preview
+                      </button>
                       <button onClick={() => downloadFile(f)} title="Download" className="p-1.5 hover:bg-secondary rounded-lg transition-colors">
                         <Download className="w-4 h-4 text-primary" />
                       </button>

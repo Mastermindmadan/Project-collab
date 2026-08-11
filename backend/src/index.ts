@@ -24,6 +24,8 @@ import driveRoutes from './routes/drive.routes';
 import reportsRoutes from './routes/reports.routes';
 import chatRoutes from './routes/chat.routes';
 
+import filesRoutes from './routes/files.routes';
+
 // Import Socket helper
 import { initChatSocket } from './sockets/chat.socket';
 
@@ -85,6 +87,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/drive', driveRoutes);
+app.use('/api/files', filesRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api', miscRoutes);

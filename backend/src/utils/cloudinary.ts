@@ -48,6 +48,8 @@ export async function uploadLocalFileToCloudinary(
     const result: UploadApiResponse = await cloudinary.uploader.upload(filePath, {
       folder,
       resource_type: resourceType,
+      type: 'upload',
+      access_mode: 'public',
       use_filename: true,
       unique_filename: true,
     });
@@ -77,6 +79,16 @@ export async function uploadLocalFileToCloudinary(
 }
 
 /**
+ * Extracts publicId from a Cloudinary URL string.
+ */
+export function extractPublicIdFromUrl(url: string): string | null {
+  if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) return null;
+  const parts = url.split('/upload/');
+  if (parts.length < 2) return null;
+  return parts[1].replace(/^v\d+\//, '');
+}
+
+/**
  * Deletes a resource from Cloudinary if given a Cloudinary URL or public_id.
  */
 export async function deleteFromCloudinary(
@@ -88,10 +100,8 @@ export async function deleteFromCloudinary(
   try {
     let publicId = urlOrPublicId;
     if (urlOrPublicId.startsWith('http://') || urlOrPublicId.startsWith('https://')) {
-      const parts = urlOrPublicId.split('/upload/');
-      if (parts.length > 1) {
-        publicId = parts[1].replace(/^v\d+\//, '');
-      }
+      const extracted = extractPublicIdFromUrl(urlOrPublicId);
+      if (extracted) publicId = extracted;
     }
 
     await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
