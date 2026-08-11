@@ -1,37 +1,51 @@
 import { Router } from 'express';
 import axios from 'axios';
 import { AIService } from '../services/ai.service';
+import { GeminiKeyManager } from '../services/geminiKeyManager';
 import prisma from '../utils/prisma';
 import { authenticateJWT, AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { geminiRateLimiter } from '../middlewares/rateLimit.middleware';
 
 const router = Router();
 
-router.use(authenticateJWT);
+// GET /api/ai/health - Health check endpoint for Gemini API keys & failover diagnostics
+router.get('/health', (_req, res) => {
+  const health = GeminiKeyManager.getHealth();
+  return res.json({
+    status: health.status,
+    activeKeyIndex: health.activeKeyIndex,
+    exhaustedKeysCount: health.exhaustedKeysCount,
+  });
+});
 
-// Lightweight Gemini connectivity probe for the UI status indicator. It checks
-// the configured model without sending application or user content to Gemini.
+// GET /api/ai/status - Lightweight Gemini connectivity probe for the UI status indicator
 router.get('/status', async (_req, res) => {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const activeKeyObj = GeminiKeyManager.getActiveKey();
   const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
 
-  if (!apiKey) {
+  if (!activeKeyObj) {
     return res.json({ status: 'unavailable', latencyMs: null });
   }
 
   const startedAt = Date.now();
   try {
     await axios.get(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}?key=${activeKeyObj.key}`,
       { timeout: 8000 }
     );
     const latencyMs = Date.now() - startedAt;
     return res.json({ status: latencyMs > 2500 ? 'slow' : 'online', latencyMs });
-  } catch (error) {
+  } catch (error: any) {
+    const status = error.response?.status;
+    if (status === 429) {
+      GeminiKeyManager.markExhausted(activeKeyObj.index, 'Status probe HTTP 429');
+    }
     console.warn('Gemini status probe failed:', error instanceof Error ? error.message : error);
     return res.json({ status: 'unavailable', latencyMs: Date.now() - startedAt });
   }
 });
+
+router.use(authenticateJWT);
 
 // 1. AI PLANNER API
 router.post('/planner', geminiRateLimiter, async (req, res) => {
@@ -48,7 +62,7 @@ router.post('/planner', geminiRateLimiter, async (req, res) => {
     res.json({ plan });
   } catch (error: any) {
     console.error('AI Planner Route Error:', error.message);
-    res.status(503).json({ error: 'Gemini is unavailable; no project plan was generated.' });
+    res.status(503).json({ success: false, message: 'AI service temporarily unavailable' });
   }
 });
 
@@ -64,7 +78,7 @@ router.post('/analyze-docs', geminiRateLimiter, async (req, res) => {
     res.json({ analysis });
   } catch (error: any) {
     console.error('Requirement Analyzer Route Error:', error.message);
-    res.status(503).json({ error: 'Gemini is unavailable; no requirements analysis was generated.' });
+    res.status(503).json({ success: false, message: 'AI service temporarily unavailable' });
   }
 });
 
@@ -87,7 +101,7 @@ router.post('/risk-detection', geminiRateLimiter, async (req, res) => {
     res.json({ riskAnalysis });
   } catch (error: any) {
     console.error('AI Risk Detection Route Error:', error.message);
-    res.status(503).json({ error: 'Gemini is unavailable; no risk analysis was generated.' });
+    res.status(503).json({ success: false, message: 'AI service temporarily unavailable' });
   }
 });
 
@@ -113,7 +127,7 @@ router.get('/projects/:projectId/delay-prediction', async (req, res) => {
     res.json({ prediction });
   } catch (error: any) {
     console.error('Delay Prediction Error:', error.message);
-    res.status(500).json({ error: 'Internal Server Error' });
+    res.status(503).json({ success: false, message: 'AI service temporarily unavailable' });
   }
 });
 
@@ -130,7 +144,7 @@ router.post('/sprint-summary', geminiRateLimiter, async (req, res) => {
     res.json({ summary });
   } catch (error: any) {
     console.error('Sprint Summary Route Error:', error.message);
-    res.status(500).json({ error: 'Failed to generate sprint summary.' });
+    res.status(503).json({ success: false, message: 'AI service temporarily unavailable' });
   }
 });
 

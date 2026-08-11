@@ -1,36 +1,44 @@
 import axios from 'axios';
+import { GeminiKeyManager } from './geminiKeyManager';
 
 export class GeminiService {
-  private static getApiKey(): string | undefined {
-    return process.env.GEMINI_API_KEY;
-  }
-
   /**
    * Calls Google Gemini API with prompt and returns generated JSON object.
-   * If Gemini API call fails or quota limit is reached, gracefully falls back to the dynamic generator.
+   * Supports automatic API key failover across multiple GEMINI_API_KEYS on HTTP 429 / RESOURCE_EXHAUSTED.
    */
   static async generateStructuredJson<T>(
     prompt: string,
     fallbackGenerator: () => T,
     allowFallback: boolean = true
   ): Promise<T> {
-    const apiKey = this.getApiKey();
     const configuredModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+    const candidateModels = Array.from(new Set([
+      configuredModel,
+      'gemini-2.0-flash',
+      'gemini-2.0-flash-lite',
+      'gemini-1.5-flash',
+      'gemini-flash-latest'
+    ]));
 
-    if (apiKey && apiKey.trim() !== '') {
-      // Models to try in sequence if one returns a model-not-found error
-      const candidateModels = Array.from(new Set([
-        configuredModel,
-        'gemini-2.0-flash',
-        'gemini-2.0-flash-lite',
-        'gemini-1.5-flash',
-        'gemini-flash-latest'
-      ]));
+    // Maximum attempts equal to number of configured keys (or 1 if none)
+    const keys = GeminiKeyManager.getKeys();
+    const maxAttempts = Math.max(keys.length, 1);
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const activeKeyObj = GeminiKeyManager.getActiveKey();
+
+      if (!activeKeyObj) {
+        console.warn('[GeminiService] No active/available Gemini API key found (all keys exhausted or missing).');
+        break;
+      }
+
+      const { key, index: keyIndex } = activeKeyObj;
+      let keyFailedWithRateLimit = false;
 
       for (const modelName of candidateModels) {
         try {
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey.trim()}`;
-          
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${key}`;
+
           const response = await axios.post(
             url,
             {
@@ -57,33 +65,44 @@ export class GeminiService {
 
           const rawText = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
           if (rawText) {
-            // Strip codeblock markdown if present
             const cleanText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
             const parsed = JSON.parse(cleanText) as T;
             return parsed;
           }
         } catch (error: any) {
           const status = error.response?.status;
-          const errMsg = error.response?.data?.error?.message || error.message;
-          console.warn(`[GeminiService] Model '${modelName}' returned error (${status}): ${errMsg}`);
+          const errMsg = error.response?.data?.error?.message || error.message || '';
+          const isResourceExhausted =
+            status === 429 ||
+            errMsg.includes('RESOURCE_EXHAUSTED') ||
+            errMsg.toLowerCase().includes('quota') ||
+            errMsg.toLowerCase().includes('rate limit');
 
-          // If quota exceeded or forbidden, break early to fallback generator
-          if (status === 429 || status === 403) {
-            console.warn('[GeminiService] Gemini API quota limit or key restriction encountered. Utilizing dynamic input-driven analysis engine.');
-            break;
+          console.warn(
+            `[GeminiService] Model '${modelName}' with key index ${keyIndex} (${GeminiKeyManager.maskKey(key)}) returned error (${status}): ${errMsg}`
+          );
+
+          if (isResourceExhausted) {
+            keyFailedWithRateLimit = true;
+            GeminiKeyManager.markExhausted(keyIndex, errMsg);
+            break; // Break model loop to retry with next key in key loop
           }
         }
       }
-    } else {
-      console.info('[GeminiService] GEMINI_API_KEY not configured. Using dynamic input-driven analysis engine.');
+
+      // If key succeeded, execution returned above.
+      // If key failed with 429, GeminiKeyManager.markExhausted switched to next key, loop continues.
+      // If key failed with non-429 error and didn't trigger rate limit, break key loop to fallback.
+      if (!keyFailedWithRateLimit) {
+        break;
+      }
     }
 
     if (!allowFallback) {
-      throw new Error('Gemini analysis is unavailable. Check the Gemini API key, quota, and model configuration.');
+      throw new Error('AI service temporarily unavailable');
     }
 
-    // Return dynamically generated analysis matching exact user inputs only for
-    // product flows that explicitly support an estimated fallback.
+    console.info('[GeminiService] Using dynamic input-driven fallback engine.');
     return fallbackGenerator();
   }
 }
