@@ -67,40 +67,73 @@ export default function AIPlanner() {
     setLoading(true);
     setError(null);
 
+    let endpoint = '';
+    let payload: any = null;
+
+    if (activeTool === 'planner') {
+      endpoint = '/ai/planner';
+      payload = {
+        title: projectTitle,
+        description: projectDesc,
+        teamSize: parseInt(teamSize) || 4,
+        deadline: duration
+      };
+    } else if (activeTool === 'analyzer') {
+      endpoint = '/ai/analyze-docs';
+      payload = {
+        documentText: reqDocText || projectDesc
+      };
+    } else if (activeTool === 'risk') {
+      endpoint = '/ai/risk-detection';
+      payload = {
+        projectName: projectTitle,
+        description: projectDesc,
+        teamSize: parseInt(teamSize) || 4,
+        deadline: duration
+      };
+    } else if (activeTool === 'sprint') {
+      endpoint = '/ai/sprint-summary';
+      payload = {
+        completedTasks: ['Authentication endpoints', 'Prisma DB migration schema', 'Kanban drag-and-drop board'],
+        pendingTasks: ['Socket.io chat integration', 'Unit tests execution', 'Cloud deployment script'],
+        commitStats: '28 commits by 4 contributors this week',
+        blockages: ['Third-party API OAuth key configuration']
+      };
+    }
+
+    console.log(`[AIPlanner Request] POST ${endpoint}:`, payload);
+
     try {
+      const res = await api.post(endpoint, payload);
+      console.log(`[AIPlanner Response] Status ${res.status}:`, res.data);
+
       if (activeTool === 'planner') {
-        const res = await api.post('/ai/planner', {
-          title: projectTitle,
-          description: projectDesc,
-          teamSize: parseInt(teamSize) || 4,
-          deadline: duration
-        });
         setPlannerResult(res.data.plan);
       } else if (activeTool === 'analyzer') {
-        const res = await api.post('/ai/analyze-docs', {
-          documentText: reqDocText || projectDesc
-        });
         setAnalyzerResult(res.data.analysis);
       } else if (activeTool === 'risk') {
-        const res = await api.post('/ai/risk-detection', {
-          projectName: projectTitle,
-          description: projectDesc,
-          teamSize: parseInt(teamSize) || 4,
-          deadline: duration
-        });
         setRiskResult(res.data.riskAnalysis);
       } else if (activeTool === 'sprint') {
-        const res = await api.post('/ai/sprint-summary', {
-          completedTasks: ['Authentication endpoints', 'Prisma DB migration schema', 'Kanban drag-and-drop board'],
-          pendingTasks: ['Socket.io chat integration', 'Unit tests execution', 'Cloud deployment script'],
-          commitStats: '28 commits by 4 contributors this week',
-          blockages: ['Third-party API OAuth key configuration']
-        });
         setSprintResult(res.data.summary);
       }
     } catch (err: any) {
-      console.error('AI Analysis Error:', err);
-      setError(err.response?.data?.error || 'Failed to connect to AI Intelligence server. Please check your network connection.');
+      console.error('[AIPlanner Error]:', err);
+
+      const status = err.response?.status;
+      const serverMessage = err.response?.data?.message || err.response?.data?.error;
+
+      if (status === 401 || status === 403) {
+        // Interceptor will handle redirect to login or token refresh
+        return;
+      } else if (status === 429) {
+        setError(serverMessage || 'AI rate limit / quota exceeded. Please try again in a moment.');
+      } else if (status === 500 || status === 503) {
+        setError(serverMessage || 'AI service temporarily unavailable. Please try again shortly.');
+      } else if (!err.response) {
+        setError('Network error: Unable to reach backend server. Please check your connection.');
+      } else {
+        setError(serverMessage || `Request failed with status ${status}.`);
+      }
     } finally {
       setLoading(false);
     }

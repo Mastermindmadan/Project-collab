@@ -11,13 +11,14 @@ export class GeminiService {
     fallbackGenerator: () => T,
     allowFallback: boolean = true
   ): Promise<T> {
-    const configuredModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+    const configuredModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
     const candidateModels = Array.from(new Set([
       configuredModel,
-      'gemini-2.0-flash',
-      'gemini-2.0-flash-lite',
-      'gemini-1.5-flash',
-      'gemini-flash-latest'
+      'gemini-3.6-flash',
+      'gemini-3.5-flash',
+      'gemini-3.1-flash-lite',
+      'gemini-2.5-flash',
+      'gemini-2.0-flash'
     ]));
 
     // Maximum attempts equal to number of configured keys (or 1 if none)
@@ -72,17 +73,20 @@ export class GeminiService {
         } catch (error: any) {
           const status = error.response?.status;
           const errMsg = error.response?.data?.error?.message || error.message || '';
-          const isResourceExhausted =
+          const isKeyError =
             status === 429 ||
+            status === 403 ||
+            status === 401 ||
             errMsg.includes('RESOURCE_EXHAUSTED') ||
             errMsg.toLowerCase().includes('quota') ||
+            errMsg.toLowerCase().includes('denied access') ||
             errMsg.toLowerCase().includes('rate limit');
 
           console.warn(
             `[GeminiService] Model '${modelName}' with key index ${keyIndex} (${GeminiKeyManager.maskKey(key)}) returned error (${status}): ${errMsg}`
           );
 
-          if (isResourceExhausted) {
+          if (isKeyError) {
             keyFailedWithRateLimit = true;
             GeminiKeyManager.markExhausted(keyIndex, errMsg);
             break; // Break model loop to retry with next key in key loop
