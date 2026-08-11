@@ -33,12 +33,14 @@ export async function uploadLocalFileToCloudinary(
   }
 
   let resourceType: 'image' | 'video' | 'raw' | 'auto' = 'auto';
-  if (mimeType.startsWith('image/')) {
+  if (mimeType === 'application/pdf' || mimeType.includes('pdf') || filePath.toLowerCase().endsWith('.pdf')) {
+    // Force 'image' resource_type for PDFs in Cloudinary to prevent /raw/upload/ and enable native browser PDF preview
+    resourceType = 'image';
+  } else if (mimeType.startsWith('image/')) {
     resourceType = 'image';
   } else if (mimeType.startsWith('video/') || mimeType.startsWith('audio/')) {
     resourceType = 'video';
   } else {
-    // Using 'auto' enables Cloudinary to serve PDFs and office docs with proper inline preview headers
     resourceType = 'auto';
   }
 
