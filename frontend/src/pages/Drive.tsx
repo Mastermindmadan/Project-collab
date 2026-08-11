@@ -92,14 +92,48 @@ export default function Drive() {
     loadDrive(selectedProject, currentFolderId);
   };
 
-  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-
+  /**
+   * Preview: open the Cloudinary URL directly in a new tab.
+   * Cloudinary CDN allows browser requests (they carry Origin/Referer headers)
+   * but blocks server-to-server requests ("deny or ACL failure").
+   */
   const previewFile = (file: DriveFile) => {
-    window.open(`${apiBase}/files/${file.id}/preview`, '_blank');
+    if (file.fileUrl && (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://'))) {
+      window.open(file.fileUrl, '_blank');
+    } else {
+      // Local/legacy file: fall back to backend endpoint
+      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+      window.open(`${apiBase}/files/${file.id}/preview`, '_blank');
+    }
   };
 
-  const downloadFile = (file: DriveFile) => {
-    window.open(`${apiBase}/files/${file.id}/download`, '_blank');
+  /**
+   * Download: use fetch + Blob to force a Save As dialog in the browser.
+   * This works because:
+   * 1. fetch() from the browser carries browser origin headers → Cloudinary allows it.
+   * 2. We create a temporary object URL from the Blob and click it with download attribute.
+   */
+  const downloadFile = async (file: DriveFile) => {
+    const url = file.fileUrl && (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://'))
+      ? file.fileUrl
+      : `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/files/${file.id}/download`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+    } catch (err) {
+      console.warn('Download via fetch failed, falling back to window.open:', err);
+      window.open(url, '_blank');
+    }
   };
 
   const displayFiles = searchResults !== null ? searchResults : files;
