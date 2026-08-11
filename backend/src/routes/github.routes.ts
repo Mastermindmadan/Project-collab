@@ -6,6 +6,14 @@ import { geminiRateLimiter } from '../middlewares/rateLimit.middleware';
 
 const router = Router();
 
+// GET /api/github/health - Health check endpoint for GitHub Intelligence service
+router.get('/health', (_req, res) => {
+  return res.json({
+    status: 'ok',
+    message: 'GitHub Intelligence service operational'
+  });
+});
+
 router.use(authenticateJWT);
 
 // 1. GITHUB INTELLIGENCE HUB API (Combines GitHub REST API + Gemini AI Insights)

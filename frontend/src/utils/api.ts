@@ -10,7 +10,7 @@ const api = axios.create({
   }
 });
 
-// Request Interceptor: Attach access token
+// Request Interceptor: Attach access token to outgoing requests
 api.interceptors.request.use(
   (config) => {
     const token = useAuthStore.getState().accessToken;
@@ -33,21 +33,32 @@ api.interceptors.response.use(
     if ((status === 401 || status === 403) && originalRequest && !originalRequest._retry) {
       originalRequest._retry = true;
 
-      const refreshToken = localStorage.getItem('refreshToken');
+      const activeUser = useAuthStore.getState().user;
+      const accounts = useAuthStore.getState().accounts;
+      const activeAccount = accounts.find(a => a.id === activeUser?.id);
+      const refreshToken = activeAccount?.refreshToken || localStorage.getItem('refreshToken');
+
       if (refreshToken) {
         try {
           // Call refresh token endpoint
           const response = await axios.post(`${API_URL}/auth/refresh-token`, { refreshToken });
           const { accessToken } = response.data;
 
-          // Save new token in Zustand store
+          // Save new token in Zustand store and updated accounts list
           useAuthStore.setState({ accessToken });
+          if (activeUser?.id) {
+            const updatedAccounts = accounts.map(a =>
+              a.id === activeUser.id ? { ...a, accessToken } : a
+            );
+            useAuthStore.setState({ accounts: updatedAccounts });
+            localStorage.setItem('pcai-accounts', JSON.stringify(updatedAccounts));
+          }
 
           // Update authorization header and retry original request
           originalRequest.headers.Authorization = `Bearer ${accessToken}`;
           return api(originalRequest);
         } catch (refreshError) {
-          console.error('Session expired or invalid. Logging out.');
+          console.error('Session expired or invalid token refresh failed. Redirecting to login.');
         }
       }
 

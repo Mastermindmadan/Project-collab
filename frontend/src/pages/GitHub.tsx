@@ -155,7 +155,10 @@ export default function GitHubIntegration() {
       }
     } catch (err: any) {
       console.error('GitHub API Fetch Error:', err);
-      setError(err.response?.data?.error || 'Failed to fetch repository data.');
+      if (err.response?.status === 401 || err.response?.status === 403) {
+        return;
+      }
+      setError(err.response?.data?.error || err.response?.data?.message || 'Failed to fetch repository data.');
     } finally {
       setIsSyncing(false);
       setIsLoading(false);
