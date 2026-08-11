@@ -32,16 +32,17 @@ export async function uploadLocalFileToCloudinary(
     throw new Error('Cloudinary credentials are not configured in environment');
   }
 
-  let resourceType: 'image' | 'video' | 'raw' | 'auto' = 'auto';
-  if (mimeType === 'application/pdf' || mimeType.includes('pdf') || filePath.toLowerCase().endsWith('.pdf')) {
-    // Force 'image' resource_type for PDFs in Cloudinary to prevent /raw/upload/ and enable native browser PDF preview
-    resourceType = 'image';
-  } else if (mimeType.startsWith('image/')) {
+  // PDFs and documents MUST use 'raw' so Cloudinary stores the original file bytes
+  // (using 'image' causes Cloudinary to rasterize the PDF → browser can't open it)
+  // Preview/download are served via backend proxy with correct Content-Type headers.
+  let resourceType: 'image' | 'video' | 'raw' | 'auto' = 'raw';
+  if (mimeType.startsWith('image/') && !mimeType.includes('pdf')) {
     resourceType = 'image';
   } else if (mimeType.startsWith('video/') || mimeType.startsWith('audio/')) {
     resourceType = 'video';
   } else {
-    resourceType = 'auto';
+    // PDFs, Word docs, Excel, PPT, zip, etc. → raw preserves original bytes
+    resourceType = 'raw';
   }
 
   try {
