@@ -93,25 +93,37 @@ export default function Drive() {
   };
 
   /**
-   * Preview: open the Cloudinary URL directly in a new tab.
-   * Cloudinary CDN allows browser requests (they carry Origin/Referer headers)
-   * but blocks server-to-server requests ("deny or ACL failure").
+   * Preview:
+   * - PDFs → Google Docs Viewer (reliable PDF rendering, avoids Edge/Cloudinary quirks)
+   * - Other files → open Cloudinary URL directly (images, videos work natively)
+   * Google Docs Viewer fetches the PDF from Cloudinary's image/upload URL (publicly accessible).
    */
   const previewFile = (file: DriveFile) => {
-    if (file.fileUrl && (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://'))) {
-      window.open(file.fileUrl, '_blank');
+    const url = file.fileUrl;
+    if (!url) return;
+
+    const isPdf =
+      file.mimeType === 'application/pdf' ||
+      file.fileType === 'pdf' ||
+      url.toLowerCase().endsWith('.pdf');
+
+    if (isPdf && (url.startsWith('http://') || url.startsWith('https://'))) {
+      // Google Docs Viewer renders the PDF — bypasses Edge PDF viewer and Cloudinary content-type quirks
+      const viewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
+      window.open(viewerUrl, '_blank');
+    } else if (url.startsWith('http://') || url.startsWith('https://')) {
+      window.open(url, '_blank');
     } else {
-      // Local/legacy file: fall back to backend endpoint
+      // Local/legacy file
       const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
       window.open(`${apiBase}/files/${file.id}/preview`, '_blank');
     }
   };
 
   /**
-   * Download: use fetch + Blob to force a Save As dialog in the browser.
-   * This works because:
-   * 1. fetch() from the browser carries browser origin headers → Cloudinary allows it.
-   * 2. We create a temporary object URL from the Blob and click it with download attribute.
+   * Download: fetch + Blob → forces Save As dialog with the correct filename.
+   * Browser fetch() carries Origin/browser headers → Cloudinary image/upload allows it.
+   * Falls back to window.open if fetch fails (CORS or network error).
    */
   const downloadFile = async (file: DriveFile) => {
     const url = file.fileUrl && (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://'))
