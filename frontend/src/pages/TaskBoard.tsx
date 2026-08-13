@@ -47,6 +47,7 @@ interface Task {
   milestoneId?: string | null;
   oldSubtasks: Subtask[];
   comments: Comment[];
+  githubVerified?: boolean;
 }
 
 interface Column {
@@ -570,9 +571,16 @@ export default function TaskBoard() {
                                         {priority.label}
                                       </span>
                                     </div>
-                                    <button className="p-1 rounded text-slate-655 hover:text-white">
-                                      <MoreVertical className="w-3.5 h-3.5" />
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                      {task.githubVerified && (
+                                        <span className="flex items-center gap-1 px-2 py-0.5 bg-purple-500/10 border border-purple-500/30 text-purple-400 text-[10px] font-bold rounded-md">
+                                          <CheckCircle className="w-3 h-3" /> GitHub Verified
+                                        </span>
+                                      )}
+                                      <button className="p-1 rounded text-slate-655 hover:text-white">
+                                        <MoreVertical className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
                                   </div>
 
                                   {/* Title */}

@@ -8,15 +8,18 @@
  *              which is NOT subject to CDN ACL restrictions.
  */
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { v2 as cloudinary } from 'cloudinary';
 import path from 'path';
 import fs from 'fs';
+import prisma from '../utils/prisma';
 import { isCloudinaryConfigured } from '../utils/cloudinary';
+import { authenticateJWT, AuthenticatedRequest } from '../middlewares/auth.middleware';
 
 const router = Router();
-const prisma = new PrismaClient();
 const uploadsDir = path.join(__dirname, '../../uploads');
+
+// All file routes require authentication
+router.use(authenticateJWT);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -25,16 +28,34 @@ interface FileRecord {
   fileUrl: string;
   name: string;
   mimeType: string | null;
+  projectId: string;
 }
 
 async function findFileById(id: string): Promise<FileRecord | null> {
   const drive = await prisma.driveFile.findUnique({ where: { id } });
-  if (drive) return { id: drive.id, fileUrl: drive.fileUrl, name: drive.name, mimeType: drive.mimeType };
+  if (drive) return { id: drive.id, fileUrl: drive.fileUrl, name: drive.name, mimeType: drive.mimeType, projectId: drive.projectId };
 
   const doc = await prisma.document.findUnique({ where: { id } });
-  if (doc) return { id: doc.id, fileUrl: doc.fileUrl, name: doc.name, mimeType: doc.mimeType };
+  if (doc) return { id: doc.id, fileUrl: doc.fileUrl, name: doc.name, mimeType: doc.mimeType, projectId: doc.projectId };
 
   return null;
+}
+
+/**
+ * Verifies that the authenticated user is a member of the team that owns the
+ * project referenced by `projectId`. Returns the teamId on success.
+ */
+async function verifyProjectAccess(authReq: AuthenticatedRequest, projectId: string): Promise<string | null> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { teamId: true },
+  });
+  if (!project) return null;
+  const membership = await prisma.teamMember.findUnique({
+    where: { userId_teamId: { userId: authReq.user!.id, teamId: project.teamId } },
+  });
+  if (!membership) return null;
+  return project.teamId;
 }
 
 /**
@@ -130,8 +151,11 @@ function resolveMime(mimeType: string | null | undefined, fileUrl: string): stri
  */
 router.get('/:id/preview', async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
     const file = await findFileById(req.params.id);
     if (!file) return res.status(404).json({ success: false, message: 'File not found' });
+    if (!(await verifyProjectAccess(authReq, file.projectId))) return res.status(403).json({ success: false, message: 'Access denied' });
 
     if (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://')) {
       if (isCloudinaryConfigured()) {
@@ -174,8 +198,11 @@ router.get('/:id/preview', async (req: Request, res: Response) => {
  */
 router.get('/:id/download', async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
     const file = await findFileById(req.params.id);
     if (!file) return res.status(404).json({ success: false, message: 'File not found' });
+    if (!(await verifyProjectAccess(authReq, file.projectId))) return res.status(403).json({ success: false, message: 'Access denied' });
 
     if (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://')) {
       if (isCloudinaryConfigured()) {

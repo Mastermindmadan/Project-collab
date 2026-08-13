@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { FileBarChart, Download, FileText, Table2, Loader2, CheckCircle2, FolderOpen, Users, CheckSquare, BarChart3, ChevronRight } from 'lucide-react';
+import { FileBarChart, Download, FileText, Table2, Loader2, CheckCircle2, FolderOpen, Users, CheckSquare, BarChart3, ChevronRight, Github } from 'lucide-react';
 import api from '../utils/api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 
-type ReportType = 'project' | 'team' | 'tasks' | 'members';
+type ReportType = 'project' | 'team' | 'tasks' | 'members' | 'github';
 
 interface ReportData { [key: string]: any }
 
@@ -14,6 +14,7 @@ const REPORT_TYPES = [
   { id: 'team' as ReportType, label: 'Team Report', icon: Users, color: 'text-purple-500', bg: 'bg-purple-500/10', desc: 'Team overview with all projects' },
   { id: 'tasks' as ReportType, label: 'Task Report', icon: CheckSquare, color: 'text-amber-500', bg: 'bg-amber-500/10', desc: 'All tasks with status and priority breakdown' },
   { id: 'members' as ReportType, label: 'Member Analytics', icon: BarChart3, color: 'text-emerald-500', bg: 'bg-emerald-500/10', desc: 'Per-member productivity and contribution' },
+  { id: 'github' as ReportType, label: 'GitHub Report', icon: Github, color: 'text-slate-400', bg: 'bg-slate-500/10', desc: 'Commits, verified tasks, contribution percentages' },
 ];
 
 export default function Reports() {
@@ -37,7 +38,7 @@ export default function Reports() {
   }, []);
 
   useEffect(() => {
-    if (selectedType === 'project' || selectedType === 'tasks') {
+    if (selectedType === 'project' || selectedType === 'tasks' || selectedType === 'github') {
       if (projects.length > 0) setSelectedId(projects[0].id);
     } else if (selectedType === 'team' || selectedType === 'members') {
       if (teams.length > 0) setSelectedId(teams[0].id);
@@ -53,7 +54,20 @@ export default function Reports() {
       if (selectedType === 'project') res = await api.get(`/reports/project/${selectedId}`);
       else if (selectedType === 'team') res = await api.get(`/reports/team/${selectedId}`);
       else if (selectedType === 'tasks') res = await api.get(`/reports/tasks?projectId=${selectedId}`);
-      else res = await api.get(`/reports/members?teamId=${selectedId}`);
+      else if (selectedType === 'members') res = await api.get(`/reports/members?teamId=${selectedId}`);
+      else if (selectedType === 'github') {
+        const githubRes = await api.get(`/github/report/${selectedId}`, { responseType: 'blob' });
+        const url = window.URL.createObjectURL(new Blob([githubRes.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `github-report-${selectedId}-${Date.now()}.pdf`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+        setLoading(false);
+        return;
+      }
       setReport(res?.data || null);
     } catch { } finally { setLoading(false); }
   };
@@ -159,7 +173,7 @@ export default function Reports() {
         </div>
         <div className="flex-1">
           <p className="text-sm font-bold text-foreground">Report Scope</p>
-          <p className="text-xs text-muted-foreground">Choose which {selectedType === 'project' || selectedType === 'tasks' ? 'project' : 'team'} to generate the report for</p>
+          <p className="text-xs text-muted-foreground">Choose which {selectedType === 'project' || selectedType === 'tasks' || selectedType === 'github' ? 'project' : 'team'} to generate the report for</p>
         </div>
         <select value={selectedId} onChange={e => setSelectedId(e.target.value)}
           className="glass-input text-sm rounded-xl outline-none text-foreground">
@@ -174,7 +188,7 @@ export default function Reports() {
       </div>
 
       {/* Report Output */}
-      {report && (
+      {report && selectedType !== 'github' && (
         <div className="glass-panel rounded-3xl p-6 space-y-5">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2">

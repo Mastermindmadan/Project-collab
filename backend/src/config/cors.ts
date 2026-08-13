@@ -19,13 +19,5 @@ export function isOriginAllowed(origin: string | undefined): boolean {
   if (!origin) return true;
 
   const configured = getAllowedOrigins();
-  if (configured.includes(origin)) return true;
-
-  // Allow all Vercel preview deployment URLs automatically
-  if (origin.endsWith('.vercel.app')) return true;
-
-  // Allow Render internal health checks
-  if (origin.endsWith('.onrender.com')) return true;
-
-  return false;
+  return configured.includes(origin);
 }

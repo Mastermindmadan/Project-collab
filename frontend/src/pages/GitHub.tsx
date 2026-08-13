@@ -1,11 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import {
   GitBranch, Github, GitCommit, Users, RefreshCw, ExternalLink,
   GitPullRequest, HelpCircle, ArrowUpRight, Sparkles, Brain,
   Star, GitFork, AlertCircle, Loader2, Plus, X,
-  Link2, FolderOpen, CheckCircle2, Trash2
+  Link2, FolderOpen, CheckCircle2, Trash2, FileDown, Activity,
+  BarChart3
 } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import api from '../utils/api';
+import { useAuthStore } from '../store/auth.store';
+import ActivityFeed from '../components/ActivityFeed';
 
 interface ConnectedRepo {
   id: string;
@@ -38,15 +43,18 @@ export default function GitHubIntegration() {
   const [connectError, setConnectError] = useState('');
 
   // ── Intelligence state ────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'ai' | 'commits' | 'branches' | 'pulls' | 'contributors'>('ai');
+  const [activeTab, setActiveTab] = useState<'ai' | 'commits' | 'branches' | 'pulls' | 'contributors' | 'chart' | 'activity'>('ai');
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<any>(null);
+  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<any>(null);
 
   // ── Platform users for contributor matching ───────────────────────────────
   const [platformUsers, setPlatformUsers] = useState<Array<{ id: string; name: string; email: string; avatarUrl?: string; githubUsername?: string }>>([]);
+  const [loadingPlatformUsers, setLoadingPlatformUsers] = useState(false);
 
   // ── Load projects on mount ────────────────────────────────────────────────
   useEffect(() => {
@@ -113,31 +121,39 @@ export default function GitHubIntegration() {
   }, [selectedProjectId]);
 
   // ── Load team members to build githubUsername map ─────────────────────────
+  const loadTeamMembers = useCallback(async () => {
+    setLoadingPlatformUsers(true);
+    try {
+      const teamsRes = await api.get('/teams/my-teams');
+      const teams = teamsRes.data.teams || [];
+      const users: typeof platformUsers = [];
+      const seen = new Set<string>();
+      teams.forEach((t: any) => {
+        (t.members || []).forEach((m: any) => {
+          if (m.user && !seen.has(m.user.id)) {
+            seen.add(m.user.id);
+            users.push({
+              id: m.user.id,
+              name: m.user.name,
+              email: m.user.email || '',
+              avatarUrl: m.user.avatarUrl,
+              githubUsername: m.user.githubUsername || undefined,
+            });
+          }
+        });
+      });
+      setPlatformUsers(users);
+      return users;
+    } catch (e) {
+      console.error('Failed to load team members for contributor matching', e);
+      return [];
+    } finally {
+      setLoadingPlatformUsers(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!selectedProjectId) return;
-    const loadTeamMembers = async () => {
-      try {
-        const teamsRes = await api.get('/teams/my-teams');
-        const teams = teamsRes.data.teams || [];
-        const users: typeof platformUsers = [];
-        const seen = new Set<string>();
-        teams.forEach((t: any) => {
-          (t.members || []).forEach((m: any) => {
-            if (m.user && !seen.has(m.user.id)) {
-              seen.add(m.user.id);
-              users.push({
-                id: m.user.id,
-                name: m.user.name,
-                email: m.user.email,
-                avatarUrl: m.user.avatarUrl,
-                githubUsername: m.user.githubUsername,
-              });
-            }
-          });
-        });
-        setPlatformUsers(users);
-      } catch (e) { /* non-critical */ }
-    };
     loadTeamMembers();
   }, [selectedProjectId]);
 
@@ -147,6 +163,8 @@ export default function GitHubIntegration() {
     setIsSyncing(true);
     setError(null);
     setData(null);
+    // Always re-fetch team members so githubUsername is never stale
+    await loadTeamMembers();
     try {
       const res = await api.get('/github/intelligence', { params: { path } });
       setData(res.data);
@@ -163,7 +181,7 @@ export default function GitHubIntegration() {
       setIsSyncing(false);
       setIsLoading(false);
     }
-  }, [selectedProjectId]);
+  }, [selectedProjectId, loadTeamMembers]);
 
   // Auto-fetch when selectedRepoPath changes
   useEffect(() => {
@@ -173,11 +191,57 @@ export default function GitHubIntegration() {
     }
   }, [selectedRepoPath]);
 
+  // ── Sync GitHub data for selected project ─────────────────────────────────
+  const handleSyncGitHub = async () => {
+    if (!selectedProjectId) return;
+    setIsSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await api.post(`/github/sync/${selectedProjectId}`);
+      setSyncResult(res.data.result);
+      setLastSync(new Date().toLocaleString());
+      if (selectedRepoPath) {
+        fetchRepoData(selectedRepoPath);
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'GitHub sync failed.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // ── Download PDF report ───────────────────────────────────────────────────
+  const handleDownloadPdf = async () => {
+    if (!selectedProjectId) return;
+    try {
+      const res = await api.get(`/github/report/${selectedProjectId}`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `github-report-${selectedProjectId}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to download report.');
+    }
+  };
+
   // ── Connect a repo to the project ─────────────────────────────────────────
   const handleConnectRepo = async () => {
-    const trimmed = newRepoInput.trim();
+    let trimmed = newRepoInput.trim();
+    // Clean full URL, trailing slashes, .git suffix
+    trimmed = trimmed.replace(/^https?:\/\/github\.com\//i, '');
+    trimmed = trimmed.replace(/\/$/, '');
+    trimmed = trimmed.replace(/\.git$/i, '');
+    const parts = trimmed.split('/').filter(Boolean);
+    if (parts.length >= 2) {
+      trimmed = `${parts[0]}/${parts[1]}`;
+    }
+
     if (!trimmed || !trimmed.includes('/')) {
-      setConnectError('Please enter a valid owner/repository path (e.g. facebook/react)');
+      setConnectError('Please enter a valid owner/repository path or GitHub URL (e.g. https://github.com/facebook/react or facebook/react)');
       return;
     }
     setConnectingRepo(true);
@@ -213,9 +277,23 @@ export default function GitHubIntegration() {
   };
 
   // ── Contributor matching helper ───────────────────────────────────────────
+  // Match GitHub contributor login against platform user githubUsername (case-insensitive)
   const matchContributor = (githubLogin: string) => {
-    const login = (githubLogin || '').toLowerCase();
-    return platformUsers.find(u => (u.githubUsername || '').toLowerCase() === login) || null;
+    if (!githubLogin) return null;
+    const login = githubLogin.toLowerCase().trim();
+    return (
+      platformUsers.find(
+        (u) =>
+          (u.githubUsername || '').toLowerCase().trim() === login ||
+          (u.email || '').split('@')[0].toLowerCase() === login,
+      ) || null
+    );
+  };
+
+  // Refresh: re-fetch team members + contributors for the selected repo
+  const handleRefreshContributors = async () => {
+    await loadTeamMembers();
+    if (selectedRepoPath) fetchRepoData(selectedRepoPath);
   };
 
   const repoInfo = data?.repoInfo;
@@ -226,8 +304,23 @@ export default function GitHubIntegration() {
   const aiInsights = data?.aiInsights || null;
   const totalCommitsCount = data?.stats?.totalCommits ?? commits.length;
 
+  const currentUser = useAuthStore((s) => s.user);
+
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
+      {/* Friendly missing githubUsername banner */}
+      {(!currentUser || !(currentUser as any).githubUsername) && (
+        <div className="flex items-center justify-between p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-500 text-sm font-semibold">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 flex-shrink-0 text-amber-500" />
+            <span>Add your GitHub username in Profile to use GitHub Intelligence.</span>
+          </div>
+          <Link to="/profile" className="px-3.5 py-1.5 bg-amber-500 text-black font-bold text-xs rounded-xl hover:bg-amber-400 transition-all flex items-center gap-1">
+            Go to Profile →
+          </Link>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
@@ -369,16 +462,49 @@ export default function GitHubIntegration() {
               <Plus className="w-4 h-4" /> Connect repo
             </button>
 
-            {selectedRepoPath && (
-              <button
-                onClick={() => fetchRepoData(selectedRepoPath)}
-                disabled={isSyncing}
-                className="ml-auto flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground font-bold text-sm rounded-xl transition-all hover:opacity-90 shadow-sm disabled:opacity-50"
-              >
-                <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                {isSyncing ? 'Fetching...' : 'Sync & Run AI'}
-              </button>
-            )}
+             {selectedRepoPath && (
+               <button
+                 onClick={() => fetchRepoData(selectedRepoPath)}
+                 disabled={isSyncing}
+                 className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground font-bold text-sm rounded-xl transition-all hover:opacity-90 shadow-sm disabled:opacity-50"
+               >
+                 <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                 {isSyncing ? 'Fetching...' : 'Sync & Run AI'}
+               </button>
+             )}
+
+             {selectedProjectId && (
+               <button
+                 onClick={handleSyncGitHub}
+                 disabled={isSyncing}
+                 className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white font-bold text-sm rounded-xl transition-all hover:opacity-90 shadow-sm disabled:opacity-50"
+               >
+                 <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                 {isSyncing ? 'Syncing...' : 'Sync Now'}
+               </button>
+             )}
+
+             {lastSync && (
+               <span className="text-xs text-muted-foreground flex items-center gap-1">
+                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                 Last synced: {lastSync}
+               </span>
+             )}
+
+             {syncResult && (
+               <span className="text-xs text-muted-foreground">
+                 {syncResult.commitsInserted} commits, {syncResult.tasksVerified} tasks verified
+               </span>
+             )}
+
+             {selectedProjectId && selectedRepoPath && (
+               <button
+                 onClick={handleDownloadPdf}
+                 className="flex items-center gap-2 px-4 py-2 bg-rose-500 text-white font-bold text-sm rounded-xl transition-all hover:opacity-90 shadow-sm"
+               >
+                 <FileDown className="w-4 h-4" /> PDF Report
+               </button>
+             )}
           </div>
         )}
       </div>
@@ -511,6 +637,8 @@ export default function GitHubIntegration() {
             { id: 'branches', label: 'Branches', icon: GitBranch },
             { id: 'pulls', label: 'Pull Requests', icon: GitPullRequest },
             { id: 'contributors', label: 'Contributors', icon: Users },
+            { id: 'chart', label: 'Contribution Chart', icon: BarChart3 },
+            { id: 'activity', label: 'Activity Feed', icon: Activity },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -693,29 +821,39 @@ export default function GitHubIntegration() {
         {/* Tab 5: Contributors — with platform user matching */}
         {!isSyncing && activeTab === 'contributors' && (
           <div className="glass-panel rounded-2xl p-6 space-y-5">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-3">
               <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                 <Users className="w-5 h-5 text-amber-500" /> Team Contributor Distribution ({contributors.length})
               </h2>
-              {platformUsers.some(u => u.githubUsername) && (
-                <span className="text-xs text-emerald-400 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Identity matching active
-                </span>
-              )}
+              <div className="flex items-center gap-3">
+                {platformUsers.some(u => u.githubUsername) && (
+                  <span className="text-xs text-emerald-400 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Identity matching active
+                  </span>
+                )}
+                <button
+                  onClick={handleRefreshContributors}
+                  disabled={loadingPlatformUsers || isSyncing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingPlatformUsers ? 'animate-spin' : ''}`} />
+                  Refresh contributors
+                </button>
+              </div>
             </div>
 
-            {!platformUsers.some(u => u.githubUsername) && (
+            {!loadingPlatformUsers && !platformUsers.some(u => u.githubUsername) && (
               <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-400 flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                 <span>
-                  No team members have set their GitHub username yet. Go to <strong>Profile → Contact Information → GitHub Username</strong> to enable contributor identity matching.
+                  No team members have set their GitHub username yet. Go to <strong>Settings → Profile → GitHub Username</strong> to enable contributor identity matching.
                 </span>
               </div>
             )}
 
             <div className="space-y-3">
               {contributors.map((c: any) => {
-                const matched = matchContributor(c.name);
+                const matched = matchContributor(c.name || c.username || c.login);
                 return (
                   <div key={c.name} className="flex items-center gap-4 p-4 glass-card rounded-xl">
                     {/* Avatar */}
@@ -765,6 +903,44 @@ export default function GitHubIntegration() {
                 <p className="text-sm text-muted-foreground text-center py-8">No contributor data available.</p>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Tab 6: Contribution Chart */}
+        {!isSyncing && activeTab === 'chart' && (
+          <div className="glass-panel rounded-2xl p-6 space-y-4">
+            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-primary" /> Contribution Breakdown
+            </h2>
+            {contributors.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={contributors.map((c: any) => ({ name: c.name || c.login || c.username, commits: c.commits }))}>
+                  <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} />
+                  <YAxis stroke="#94a3b8" fontSize={12} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                    itemStyle={{ color: '#f8fafc' }}
+                  />
+                  <Bar dataKey="commits" radius={[4, 4, 0, 0]}>
+                    {contributors.map((_c: any, index: number) => (
+                      <Cell key={index} fill={['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4'][index % 6]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-8">No contributor data available for chart.</p>
+            )}
+          </div>
+        )}
+
+        {/* Tab 7: Activity Feed */}
+        {!isSyncing && activeTab === 'activity' && selectedProjectId && (
+          <div className="glass-panel rounded-2xl p-6 space-y-4">
+            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+              <Activity className="w-5 h-5 text-primary" /> Live Activity Feed
+            </h2>
+            <ActivityFeed projectId={selectedProjectId} limit={30} />
           </div>
         )}
       </>}

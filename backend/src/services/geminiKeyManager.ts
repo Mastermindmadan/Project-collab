@@ -4,6 +4,8 @@ dotenv.config();
 export interface KeyHealth {
   status: 'ok' | 'degraded' | 'exhausted' | 'unavailable';
   activeKeyIndex: number;
+  totalKeys: number;
+  activeKeyDisplay: string;
   exhaustedKeysCount: number;
 }
 
@@ -128,15 +130,19 @@ export class GeminiKeyManager {
 
     let status: 'ok' | 'degraded' | 'exhausted' | 'unavailable' = 'ok';
     let activeKeyIndex = -1;
+    let activeKeyDisplay = 'None';
 
     if (totalCount === 0) {
       status = 'unavailable';
+      activeKeyDisplay = 'No Keys Configured';
     } else if (exhaustedCount >= totalCount) {
       status = 'exhausted';
       activeKeyIndex = -1;
+      activeKeyDisplay = `All ${totalCount} Keys Exhausted`;
     } else {
       const active = this.getActiveKey();
       activeKeyIndex = active ? active.index : -1;
+      activeKeyDisplay = activeKeyIndex >= 0 ? `Key ${activeKeyIndex + 1} of ${totalCount}` : 'None Active';
       if (exhaustedCount > 0) {
         status = 'degraded';
       } else {
@@ -147,6 +153,8 @@ export class GeminiKeyManager {
     return {
       status,
       activeKeyIndex,
+      totalKeys: totalCount,
+      activeKeyDisplay,
       exhaustedKeysCount: exhaustedCount,
     };
   }

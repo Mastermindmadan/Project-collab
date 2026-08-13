@@ -77,6 +77,19 @@ export interface GitHubIntelligenceOutput {
   };
 }
 
+export function parseGitHubRepoPath(input: string): string {
+  if (!input) return 'facebook/react';
+  let clean = input.trim();
+  clean = clean.replace(/^https?:\/\/github\.com\//i, '');
+  clean = clean.replace(/\/$/, '');
+  clean = clean.replace(/\.git$/i, '');
+  const parts = clean.split('/').filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0]}/${parts[1]}`;
+  }
+  return clean || 'facebook/react';
+}
+
 export class GitHubService {
   private static async getHeaders(token?: string) {
     const activeToken = token || process.env.GITHUB_TOKEN;
@@ -89,7 +102,7 @@ export class GitHubService {
   }
 
   static async getRepoInfo(repoPath: string, token?: string) {
-    const cleanPath = repoPath.replace('https://github.com/', '').trim();
+    const cleanPath = parseGitHubRepoPath(repoPath);
     try {
       const headers = await this.getHeaders(token);
       const response = await axios.get(`https://api.github.com/repos/${cleanPath}`, { headers, timeout: 8000 });
@@ -119,7 +132,7 @@ export class GitHubService {
   }
 
   static async getCommits(repoPath: string, token?: string): Promise<GitCommitInfo[]> {
-    const cleanPath = repoPath.replace('https://github.com/', '').trim();
+    const cleanPath = parseGitHubRepoPath(repoPath);
     try {
       const headers = await this.getHeaders(token);
       const response = await axios.get(`https://api.github.com/repos/${cleanPath}/commits?per_page=20`, { headers, timeout: 8000 });
@@ -146,7 +159,7 @@ export class GitHubService {
   }
 
   static async getContributors(repoPath: string, token?: string): Promise<GitContributorInfo[]> {
-    const cleanPath = repoPath.replace('https://github.com/', '').trim();
+    const cleanPath = parseGitHubRepoPath(repoPath);
     try {
       const headers = await this.getHeaders(token);
       const response = await axios.get(`https://api.github.com/repos/${cleanPath}/contributors?per_page=10`, { headers, timeout: 8000 });
@@ -175,7 +188,7 @@ export class GitHubService {
   }
 
   static async getBranches(repoPath: string, token?: string): Promise<GitBranchInfo[]> {
-    const cleanPath = repoPath.replace('https://github.com/', '').trim();
+    const cleanPath = parseGitHubRepoPath(repoPath);
     try {
       const headers = await this.getHeaders(token);
       const response = await axios.get(`https://api.github.com/repos/${cleanPath}/branches?per_page=10`, { headers, timeout: 8000 });
@@ -201,7 +214,7 @@ export class GitHubService {
   }
 
   static async getPullRequests(repoPath: string, token?: string): Promise<GitPullRequestInfo[]> {
-    const cleanPath = repoPath.replace('https://github.com/', '').trim();
+    const cleanPath = parseGitHubRepoPath(repoPath);
     try {
       const headers = await this.getHeaders(token);
       const response = await axios.get(`https://api.github.com/repos/${cleanPath}/pulls?state=all&per_page=10`, { headers, timeout: 8000 });
@@ -230,7 +243,7 @@ export class GitHubService {
    * 2. Feeds statistics to Gemini API to generate deep software engineering insights
    */
   static async getGitHubIntelligence(repoPath: string, token?: string): Promise<GitHubIntelligenceOutput> {
-    const cleanRepoPath = repoPath.replace('https://github.com/', '').trim() || 'facebook/react';
+    const cleanRepoPath = parseGitHubRepoPath(repoPath);
 
     // Fetch all GitHub REST metrics in parallel
     const [repoInfo, commits, contributors, branches, pullRequests] = await Promise.all([

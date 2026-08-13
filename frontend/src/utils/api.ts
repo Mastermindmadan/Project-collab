@@ -1,7 +1,11 @@
 import axios from 'axios';
 import { useAuthStore } from '../store/auth.store';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '');
+
+if (!API_URL) {
+  throw new Error('VITE_API_URL must be configured for production builds.');
+}
 
 const api = axios.create({
   baseURL: API_URL,
@@ -42,13 +46,15 @@ api.interceptors.response.use(
         try {
           // Call refresh token endpoint
           const response = await axios.post(`${API_URL}/auth/refresh-token`, { refreshToken });
-          const { accessToken } = response.data;
+          const { accessToken, refreshToken: nextRefreshToken } = response.data;
 
           // Save new token in Zustand store and updated accounts list
           useAuthStore.setState({ accessToken });
           if (activeUser?.id) {
             const updatedAccounts = accounts.map(a =>
-              a.id === activeUser.id ? { ...a, accessToken } : a
+              a.id === activeUser.id
+                ? { ...a, accessToken, refreshToken: nextRefreshToken || a.refreshToken }
+                : a
             );
             useAuthStore.setState({ accounts: updatedAccounts });
             localStorage.setItem('pcai-accounts', JSON.stringify(updatedAccounts));

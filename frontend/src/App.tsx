@@ -36,6 +36,7 @@ const Drive = lazy(() => import('./pages/Drive'));
 
 // Lazy-loaded Intelligence pages
 const AIPlanner = lazy(() => import('./pages/AIPlanner'));
+const AIProjectManager = lazy(() => import('./pages/AIProjectManager'));
 const GitHub = lazy(() => import('./pages/GitHub'));
 
 // Lazy-loaded Reports & Settings
@@ -83,6 +84,7 @@ export default function App() {
 
           {/* Intelligence */}
           <Route path="/ai" element={<ProtectedRoute><AIPlanner /></ProtectedRoute>} />
+          <Route path="/ai-pm" element={<ProtectedRoute><AIProjectManager /></ProtectedRoute>} />
           <Route path="/github" element={<ProtectedRoute><GitHub /></ProtectedRoute>} />
 
           {/* Reports */}

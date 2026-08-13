@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Bell, CheckCheck, X, CheckSquare, GitBranch, MessageSquare, AlertTriangle, Users, Clock, Trash2, Loader2 } from 'lucide-react';
+import { io } from 'socket.io-client';
 import api from '../utils/api';
+import { useAuthStore } from '../store/auth.store';
 
 type NotifType = 'task' | 'commit' | 'message' | 'risk' | 'invite' | 'deadline' | 'general';
 
@@ -52,9 +54,30 @@ export default function Notifications() {
     }
   };
 
+  const accessToken = useAuthStore((s) => s.accessToken);
+  const activeUserId = useAuthStore((s) => s.user?.id);
+
   useEffect(() => {
     loadNotifications();
-  }, []);
+
+    if (!accessToken) return;
+
+    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '');
+    if (!apiBase) return;
+    const WS_URL = apiBase.replace(/\/api$/, '');
+    const socket = io(WS_URL, {
+      auth: { token: accessToken },
+      transports: ['websocket', 'polling'],
+    });
+
+    socket.on('notification:new', (newNotif: Notification) => {
+      setNotifications(prev => [newNotif, ...prev]);
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [accessToken, activeUserId]);
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
   const filtered = filter === 'unread' ? notifications.filter((n) => !n.isRead) : notifications;

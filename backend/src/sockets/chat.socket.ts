@@ -1,8 +1,13 @@
 import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import prisma from '../utils/prisma';
+import { sendNotificationToUser } from '../utils/socket';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-projectcollab-ai-2026-xyz-abc';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET must be set in environment variables.');
+}
 
 interface ActiveUser {
   userId: string;
@@ -54,6 +59,7 @@ export const initChatSocket = (io: Server) => {
     if (!user) return socket.disconnect();
 
     console.log(`🔌 Socket connected: ${user.name} (${socket.id})`);
+    socket.join(`user:${user.id}`);
 
     // 🚪 2. Join Team Chat Room with Security Check
     socket.on('join-team', async (data: { teamId: string }) => {
@@ -190,13 +196,14 @@ export const initChatSocket = (io: Server) => {
         const snippet = sanitizedContent.length > 50 ? sanitizedContent.substring(0, 50) + '...' : sanitizedContent;
 
         for (const m of otherMembers) {
-          await prisma.notification.create({
+          const notif = await prisma.notification.create({
             data: {
               userId: m.userId,
               title: `New Message in ${teamName}`,
               message: `${user.name}: "${snippet}"`
             }
           });
+          sendNotificationToUser(m.userId, notif);
         }
 
       } catch (error) {

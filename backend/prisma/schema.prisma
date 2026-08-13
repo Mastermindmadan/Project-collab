@@ -1,5 +1,6 @@
 generator client {
   provider        = "prisma-client-js"
+  binaryTargets   = ["native", "debian-openssl-3.0.x"]
   previewFeatures = ["relationJoins"]
 }
 
@@ -10,20 +11,22 @@ datasource db {
 }
 
 model User {
-  id              String         @id @default(uuid())
-  email           String         @unique
+  id              String           @id @default(uuid())
+  email           String           @unique
   passwordHash    String
   name            String
   avatarUrl       String?
-  role            String         @default("STUDENT")
+  role            String           @default("STUDENT")
   skills          String?
   bio             String?
   github          String?
   linkedin        String?
   phone           String?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
   githubUsername  String?
+  aiConversations AIConversation[]
+  aiUsages        AIUsage[]
   activityLogs    ActivityLog[]
   documents       Document[]
   driveFiles      DriveFile[]
@@ -79,6 +82,7 @@ model Project {
   status       String        @default("HEALTHY")
   healthScore  Int           @default(100)
   githubRepo   String?
+  lastGitSync  DateTime?
   teamId       String
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
@@ -93,6 +97,8 @@ model Project {
   team         Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
   repositories Repository[]
   tasks        Task[]
+  gitCommits   GitCommit[]
+  activityEvents ActivityEvent[]
 }
 
 model Repository {
@@ -136,6 +142,7 @@ model Task {
   labels       String?
   timeEstimate Int?
   attachments  String?
+  githubVerified Boolean     @default(false)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   oldSubtasks  Subtask[]
@@ -145,6 +152,7 @@ model Task {
   subtasks     Task[]        @relation("SubTasks")
   project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   comments     TaskComment[]
+  commitLinks  TaskCommitLink[]
 }
 
 model Subtask {
@@ -290,3 +298,83 @@ enum TokenType {
   REFRESH
   PASSWORD_RESET
 }
+
+model AIConversation {
+  id        String      @id @default(uuid())
+  userId    String
+  title     String
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  AIMessage[]
+}
+
+model AIMessage {
+  id             String         @id @default(uuid())
+  conversationId String
+  role           String
+  content        String
+  planData       String?        @db.Text
+  createdAt      DateTime       @default(now())
+  conversation   AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+model AICache {
+  id        String    @id @default(uuid())
+  cacheKey  String    @unique
+  response  Json
+  provider  String?
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model AIUsage {
+  id        String   @id @default(uuid())
+  userId    String
+  feature   String
+  usedAt    DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model GitCommit {
+  id            String    @id @default(uuid())
+  projectId     String
+  sha           String    @unique
+  message       String
+  author        String
+  authorEmail   String?
+  commitUrl     String?
+  committedAt   DateTime
+  additions     Int?
+  deletions     Int?
+  createdAt     DateTime  @default(now())
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  taskLinks     TaskCommitLink[]
+
+  @@index([projectId, committedAt])
+}
+
+model TaskCommitLink {
+  id         String    @id @default(uuid())
+  taskId     String
+  commitId   String
+  createdAt  DateTime  @default(now())
+  task       Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  commit     GitCommit @relation(fields: [commitId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, commitId])
+}
+
+model ActivityEvent {
+  id          String    @id @default(uuid())
+  projectId   String
+  type        String
+  title       String
+  description String?
+  metadata    String?
+  createdAt   DateTime  @default(now())
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+}
+

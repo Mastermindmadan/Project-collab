@@ -4,8 +4,14 @@ import jwt from 'jsonwebtoken';
 import prisma from '../utils/prisma';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-projectcollab-ai-2026-xyz-abc';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'super-secret-refresh-key-projectcollab-ai-2026-xyz-abc';
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+
+if (!JWT_SECRET || !JWT_REFRESH_SECRET) {
+  throw new Error('JWT_SECRET and JWT_REFRESH_SECRET must be set in environment variables.');
+}
+
+const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Helper to generate access and refresh tokens
 const generateTokens = (user: { id: string; email: string; name: string; role: 'STUDENT' | 'INSTRUCTOR' }) => {
@@ -31,8 +37,45 @@ const parseSkills = (skills: any) => {
   return Array.isArray(skills) ? skills : [];
 };
 
+const purgeExpiredTokens = async () => {
+  await prisma.token.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+};
+
+const storeRefreshToken = async (userId: string, plainRefreshToken: string) => {
+  const hashedRefreshToken = await bcrypt.hash(plainRefreshToken, 10);
+  await prisma.token.create({
+    data: {
+      token: hashedRefreshToken,
+      userId,
+      type: 'REFRESH',
+      expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
+    },
+  });
+};
+
+const findMatchingRefreshTokenRecord = async (userId: string, plainRefreshToken: string) => {
+  const candidates = await prisma.token.findMany({
+    where: {
+      userId,
+      type: 'REFRESH',
+      expiresAt: { gte: new Date() },
+    },
+    include: { user: true },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+  });
+
+  for (const candidate of candidates) {
+    const isMatch = await bcrypt.compare(plainRefreshToken, candidate.token);
+    if (isMatch) return candidate;
+  }
+
+  return null;
+};
+
 export const register = async (req: Request, res: Response) => {
   try {
+    await purgeExpiredTokens();
     const { email, password, name, role, skills } = req.body;
 
     if (!email || !password || !name) {
@@ -59,14 +102,7 @@ export const register = async (req: Request, res: Response) => {
 
     const { accessToken, refreshToken } = generateTokens(user as any);
 
-    // Save refresh token in DB
-    await prisma.token.create({
-      data: {
-        token: refreshToken,
-        userId: user.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
-      }
-    });
+    await storeRefreshToken(user.id, refreshToken);
 
     res.status(201).json({
       message: 'Registration successful',
@@ -88,6 +124,7 @@ export const register = async (req: Request, res: Response) => {
 
 export const login = async (req: Request, res: Response) => {
   try {
+    await purgeExpiredTokens();
     const { email, password } = req.body;
 
     if (!email || !password) {
@@ -106,14 +143,7 @@ export const login = async (req: Request, res: Response) => {
 
     const { accessToken, refreshToken } = generateTokens(user as any);
 
-    // Save refresh token in DB
-    await prisma.token.create({
-      data: {
-        token: refreshToken,
-        userId: user.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
-      }
-    });
+    await storeRefreshToken(user.id, refreshToken);
 
     res.json({
       message: 'Login successful',
@@ -136,12 +166,21 @@ export const login = async (req: Request, res: Response) => {
 
 export const logout = async (req: Request, res: Response) => {
   try {
+    await purgeExpiredTokens();
     const { refreshToken } = req.body;
-    if (refreshToken) {
-      await prisma.token.deleteMany({
-        where: { token: refreshToken }
-      });
+
+    if (refreshToken && typeof refreshToken === 'string') {
+      try {
+        const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET) as { id: string };
+        const matched = await findMatchingRefreshTokenRecord(decoded.id, refreshToken);
+        if (matched) {
+          await prisma.token.delete({ where: { id: matched.id } });
+        }
+      } catch {
+        // Invalid refresh token on logout is non-fatal; return success consistently.
+      }
     }
+
     res.json({ message: 'Logout successful' });
   } catch (error) {
     console.error(error);
@@ -151,28 +190,34 @@ export const logout = async (req: Request, res: Response) => {
 
 export const refreshToken = async (req: Request, res: Response) => {
   try {
-    const { refreshToken } = req.body;
-    if (!refreshToken) {
+    await purgeExpiredTokens();
+    const { refreshToken: incomingRefreshToken } = req.body;
+    if (!incomingRefreshToken || typeof incomingRefreshToken !== 'string') {
       return res.status(400).json({ error: 'Refresh token is required.' });
     }
 
-    const dbToken = await prisma.token.findUnique({
-      where: { token: refreshToken },
-      include: { user: true }
-    });
+    let decoded: { id: string };
+    try {
+      decoded = jwt.verify(incomingRefreshToken, JWT_REFRESH_SECRET) as { id: string };
+    } catch {
+      return res.status(403).json({ error: 'Invalid or expired refresh token.' });
+    }
+
+    const dbToken = await findMatchingRefreshTokenRecord(decoded.id, incomingRefreshToken);
 
     if (!dbToken || dbToken.expiresAt < new Date()) {
-      if (dbToken) {
-        await prisma.token.delete({ where: { id: dbToken.id } });
-      }
       return res.status(403).json({ error: 'Invalid or expired refresh token.' });
     }
 
     const tokens = generateTokens(dbToken.user as any);
 
-    // Swap old refresh token for a new one (Optional, but let's just issue a new access token here)
+    // Rotate refresh token: invalidate old token and persist new hashed token.
+    await prisma.token.delete({ where: { id: dbToken.id } });
+    await storeRefreshToken(dbToken.userId, tokens.refreshToken);
+
     res.json({
-      accessToken: tokens.accessToken
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
     });
   } catch (error) {
     console.error(error);
@@ -209,6 +254,16 @@ export const updateProfile = async (req: Request, res: Response) => {
     if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
 
     const { name, skills, avatarUrl, bio, github, linkedin, phone, githubUsername } = req.body;
+
+    if (githubUsername && typeof githubUsername === 'string' && githubUsername.trim().length > 0) {
+      const cleanUsername = githubUsername.trim();
+      const githubRegex = /^(?!.*--)[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/;
+      if (!githubRegex.test(cleanUsername)) {
+        return res.status(400).json({
+          error: 'Invalid GitHub username format. Alphanumeric characters and single hyphens only, max 39 characters, no leading/trailing hyphen.'
+        });
+      }
+    }
 
     const user = await prisma.user.update({
       where: { id: authReq.user.id },

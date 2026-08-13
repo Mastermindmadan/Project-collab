@@ -1,4 +1,4 @@
-import { GeminiService } from './gemini.service';
+import { AIRouterService } from './aiRouter.service';
 
 export interface PlannerOutput {
   title: string;
@@ -78,9 +78,12 @@ Generate a JSON object matching EXACTLY this TypeScript structure:
 }
 `;
 
-    return GeminiService.generateStructuredJson<PlannerOutput>(prompt, () =>
-      this.generateDynamicPlan(title, objectives, teamSize, deadline)
-    , false);
+    const res = await AIRouterService.generateJSON<PlannerOutput>(
+      prompt,
+      () => this.generateDynamicPlan(title, objectives, teamSize, deadline),
+      { feature: 'planner' }
+    );
+    return res.data;
   }
 
   // 2. REQUIREMENT ANALYZER
@@ -112,9 +115,12 @@ Extract and analyze requirements. Generate a JSON object matching EXACTLY this T
 }
 `;
 
-    return GeminiService.generateStructuredJson<RequirementOutput>(prompt, () =>
-      this.generateDynamicRequirementAnalysis(documentText)
-    , false);
+    const res = await AIRouterService.generateJSON<RequirementOutput>(
+      prompt,
+      () => this.generateDynamicRequirementAnalysis(documentText),
+      { feature: 'analyzer' }
+    );
+    return res.data;
   }
 
   // 3. AI RISK DETECTION ENGINE
@@ -160,9 +166,12 @@ Generate a JSON object matching EXACTLY this structure:
 }
 `;
 
-    return GeminiService.generateStructuredJson<RiskAnalysisOutput>(prompt, () =>
-      this.generateDynamicRiskAnalysis(projectName, description, teamSize, deadline)
-    , false);
+    const res = await AIRouterService.generateJSON<RiskAnalysisOutput>(
+      prompt,
+      () => this.generateDynamicRiskAnalysis(projectName, description, teamSize, deadline),
+      { feature: 'risk' }
+    );
+    return res.data;
   }
 
   // 4. DELAY PREDICTION
@@ -227,12 +236,17 @@ Return a JSON object:
 }
 `;
 
-    return GeminiService.generateStructuredJson(prompt, () => ({
-      workCompleted: completedTasks.length > 0 ? completedTasks : ['Initial authentication module', 'Database schema setup'],
-      pendingWork: pendingTasks.length > 0 ? pendingTasks : ['Web socket implementation', 'Unit test coverage'],
-      delayRisks: blockages.length > 0 ? blockages : ['No active sprint blockages detected'],
-      productivityIndex: Math.floor(Math.random() * 20) + 75
-    }));
+    const res = await AIRouterService.generateJSON(
+      prompt,
+      () => ({
+        workCompleted: completedTasks.length > 0 ? completedTasks : ['Initial authentication module', 'Database schema setup'],
+        pendingWork: pendingTasks.length > 0 ? pendingTasks : ['Web socket implementation', 'Unit test coverage'],
+        delayRisks: blockages.length > 0 ? blockages : ['No active sprint blockages detected'],
+        productivityIndex: Math.floor(Math.random() * 20) + 75,
+      }),
+      { feature: 'general' }
+    );
+    return res.data;
   }
 
   // 6. HEALTH SCORE COMPUTATION

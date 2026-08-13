@@ -2,15 +2,18 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../utils/prisma';
 import {
   isCloudinaryConfigured,
   uploadLocalFileToCloudinary,
   deleteFromCloudinary,
 } from '../utils/cloudinary';
+import { authenticateJWT, AuthenticatedRequest } from '../middlewares/auth.middleware';
 
 const router = Router();
-const prisma = new PrismaClient();
+
+// All upload routes require authentication
+router.use(authenticateJWT);
 
 // Ensure uploads directory exists for temp local storage
 const uploadsDir = path.join(__dirname, '../../uploads');
@@ -69,15 +72,38 @@ function getFileType(mimetype: string): string {
   return 'other';
 }
 
-// POST /api/upload — Upload a file (Cloudinary primary, local disk fallback)
+  // POST /api/upload — Upload a file (Cloudinary primary, local disk fallback)
 router.post('/', handleUploadSingle('file'), async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
-    const { projectId, category, description, uploadedById } = req.body;
-    if (!projectId || !uploadedById) {
+
+    const { projectId, category, description } = req.body;
+    if (!projectId) {
       if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ success: false, message: 'projectId and uploadedById are required' });
+      return res.status(400).json({ success: false, message: 'projectId is required' });
     }
+
+    // Verify the user is a member of the target project's team before allowing upload
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { teamId: true },
+    });
+    if (!project) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+    const membership = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId: project.teamId } },
+    });
+    if (!membership) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    // ALWAYS record the authenticated user as the uploader (ignore any client-supplied uploadedById)
+    const uploadedById = authReq.user.id;
 
     let fileUrl = `/uploads/${req.file.filename}`;
     let storageProvider = 'local';
@@ -104,7 +130,7 @@ router.post('/', handleUploadSingle('file'), async (req: Request, res: Response)
         projectId,
         uploadedById,
         fileType: getFileType(req.file.mimetype),
-        fileSize: req.file.size,
+        fileSize: Number.isFinite(req.file.size) ? req.file.size : null,
         mimeType: req.file.mimetype,
         description: description || null,
         version: 1,
@@ -123,6 +149,8 @@ router.post('/', handleUploadSingle('file'), async (req: Request, res: Response)
 // GET /api/upload/file/:filename — Serve/download file (redirects to Cloudinary if remote)
 router.get('/file/:filename', async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
     const doc = await prisma.document.findFirst({
       where: {
         OR: [
@@ -130,9 +158,18 @@ router.get('/file/:filename', async (req: Request, res: Response) => {
           { name: req.params.filename },
         ],
       },
+      include: { project: { select: { teamId: true } } },
     });
 
-    if (doc && (doc.fileUrl.startsWith('http://') || doc.fileUrl.startsWith('https://'))) {
+    if (!doc) return res.status(404).json({ success: false, message: 'File not found' });
+
+    // Verify membership on the document's project
+    const membership = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId: doc.project.teamId } },
+    });
+    if (!membership) return res.status(403).json({ success: false, message: 'Access denied' });
+
+    if (doc.fileUrl.startsWith('http://') || doc.fileUrl.startsWith('https://')) {
       return res.redirect(doc.fileUrl);
     }
 
@@ -147,11 +184,22 @@ router.get('/file/:filename', async (req: Request, res: Response) => {
 // DELETE /api/upload/:id — Delete document record and underlying storage
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
-    const doc = await prisma.document.findUnique({ where: { id: req.params.id } });
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+    const doc = await prisma.document.findUnique({
+      where: { id: req.params.id },
+      include: { project: { select: { teamId: true } } },
+    });
     if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
 
+    // Verify membership on the document's project
+    const membership = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId: doc.project.teamId } },
+    });
+    if (!membership) return res.status(403).json({ success: false, message: 'Access denied' });
+
     if (doc.fileUrl.startsWith('http://') || doc.fileUrl.startsWith('https://')) {
-      await deleteFromCloudinary(doc.fileUrl);
+      await deleteFromCloudinary(doc.fileUrl, doc.mimeType);
     } else {
       const filePath = path.join(uploadsDir, path.basename(doc.fileUrl));
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -167,10 +215,24 @@ router.delete('/:id', async (req: Request, res: Response) => {
 // POST /api/upload/:id/version — Upload new version of existing doc
 router.post('/:id/version', handleUploadSingle('file'), async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
-    const { uploadedById, notes } = req.body;
+    const { notes } = req.body;
     const doc = await prisma.document.findUnique({ where: { id: req.params.id } });
     if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
+
+    // Verify membership on the document's project
+    const proj = await prisma.project.findUnique({
+      where: { id: doc.projectId },
+      select: { teamId: true },
+    });
+    if (proj) {
+      const membership = await prisma.teamMember.findUnique({
+        where: { userId_teamId: { userId: authReq.user.id, teamId: proj.teamId } },
+      });
+      if (!membership) return res.status(403).json({ success: false, message: 'Access denied' });
+    }
 
     const newVersion = doc.version + 1;
     let fileUrl = `/uploads/${req.file.filename}`;
@@ -191,12 +253,18 @@ router.post('/:id/version', handleUploadSingle('file'), async (req: Request, res
     }
 
     await prisma.docVersion.create({
-      data: { documentId: doc.id, version: doc.version, fileUrl: doc.fileUrl, uploadedById, notes },
+      data: { documentId: doc.id, version: doc.version, fileUrl: doc.fileUrl, uploadedById: authReq.user.id, notes },
     });
 
     const updated = await prisma.document.update({
       where: { id: req.params.id },
-      data: { fileUrl, version: newVersion, fileSize: req.file.size, mimeType: req.file.mimetype, updatedAt: new Date() },
+      data: {
+        fileUrl,
+        version: newVersion,
+        fileSize: Number.isFinite(req.file.size) ? req.file.size : doc.fileSize,
+        mimeType: req.file.mimetype,
+        updatedAt: new Date(),
+      },
     });
 
     res.json({ success: true, storageProvider, document: updated });
@@ -211,6 +279,26 @@ router.post('/:id/version', handleUploadSingle('file'), async (req: Request, res
 // GET /api/upload/:id/versions — Get version history
 router.get('/:id/versions', async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
+    // Verify membership on the document's project before returning versions
+    const doc = await prisma.document.findUnique({
+      where: { id: req.params.id },
+      select: { projectId: true },
+    });
+    if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
+    const proj = await prisma.project.findUnique({
+      where: { id: doc.projectId },
+      select: { teamId: true },
+    });
+    if (proj) {
+      const membership = await prisma.teamMember.findUnique({
+        where: { userId_teamId: { userId: authReq.user.id, teamId: proj.teamId } },
+      });
+      if (!membership) return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
     const versions = await prisma.docVersion.findMany({
       where: { documentId: req.params.id },
       orderBy: { version: 'desc' },
@@ -222,4 +310,3 @@ router.get('/:id/versions', async (req: Request, res: Response) => {
 });
 
 export default router;
-

@@ -247,14 +247,16 @@ export const getProjectSummary = async (req: Request, res: Response) => {
 };
 
 export const updateProject = async (req: Request, res: Response) => {
-  try {
+    try {
     const authReq = req as AuthenticatedRequest;
     if (!authReq.user) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
     const { projectId } = req.params;
-    const { title, description, objectives, githubRepo, healthScore, status } = req.body;
+    // NOTE: healthScore and status are computed fields — intentionally excluded
+    // from client-controlled updates so callers cannot tamper with the health model.
+    const { title, description, objectives, githubRepo } = req.body;
 
     const project = await prisma.project.findUnique({ where: { id: projectId } });
     if (!project) {
@@ -271,14 +273,12 @@ export const updateProject = async (req: Request, res: Response) => {
     }
 
     const updatedProject = await prisma.project.update({
-      where: { id: projectId },
+            where: { id: projectId },
       data: {
         title: title !== undefined ? title : project.title,
         description: description !== undefined ? description : project.description,
         objectives: objectives !== undefined ? objectives : project.objectives,
         githubRepo: githubRepo !== undefined ? githubRepo : project.githubRepo,
-        healthScore: healthScore !== undefined ? healthScore : project.healthScore,
-        status: status !== undefined ? status : project.status
       }
     });
 
@@ -487,7 +487,31 @@ export const uploadDocument = async (req: Request, res: Response) => {
 
 export const getProjectMessages = async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
     const { projectId } = req.params;
+
+    // Verify the user is a member of the team that owns this project
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { teamId: true },
+    });
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found.' });
+    }
+
+    const membership = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId: project.teamId } }
+    });
+
+    if (!membership) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
     const messages = await prisma.message.findMany({
       where: { projectId },
       include: {
@@ -515,14 +539,27 @@ export const connectRepository = async (req: Request, res: Response) => {
 
     let owner = inputOwner;
     let repoName = inputRepoName;
-    let path = fullPath ? fullPath.replace('https://github.com/', '').trim() : '';
+    let path = fullPath
+      ? fullPath
+          .trim()
+          .replace(/^https?:\/\/(?:www\.)?github\.com\//i, '')
+          .replace(/\/+$/, '')
+          .replace(/\.git$/i, '')
+      : '';
 
     if (path && (!owner || !repoName)) {
-      const parts = path.split('/');
+      const parts = path.split('/').filter(Boolean);
       owner = parts[0] || '';
       repoName = parts[1] || '';
     } else if (owner && repoName) {
-      path = `${owner}/${repoName}`;
+      path = `${owner}/${repoName}`.trim().replace(/\/+$/, '').replace(/\.git$/i, '');
+    }
+
+    if (path) {
+      const parts = path.split('/').filter(Boolean);
+      owner = parts[0] || '';
+      repoName = parts[1] || '';
+      path = owner && repoName ? `${owner}/${repoName}` : '';
     }
 
     if (!owner || !repoName || !path) {

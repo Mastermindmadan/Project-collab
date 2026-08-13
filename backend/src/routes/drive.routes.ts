@@ -2,15 +2,18 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../utils/prisma';
 import {
   isCloudinaryConfigured,
   uploadLocalFileToCloudinary,
   deleteFromCloudinary,
 } from '../utils/cloudinary';
+import { authenticateJWT, AuthenticatedRequest } from '../middlewares/auth.middleware';
 
 const router = Router();
-const prisma = new PrismaClient();
+
+// All drive routes require authentication
+router.use(authenticateJWT);
 
 const uploadsDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -72,8 +75,21 @@ function getFileType(mime: string): string {
 // GET /api/drive/:projectId — list folders and root-level files
 router.get('/:projectId', async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
     const { projectId } = req.params;
     const { folderId } = req.query;
+
+        // Verify membership on the project's team
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { teamId: true },
+    });
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+    const member = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId: project.teamId } },
+    });
+    if (!member) return res.status(403).json({ success: false, message: 'Access denied' });
 
     const folders = await prisma.driveFolder.findMany({
       where: { projectId, parentId: folderId ? String(folderId) : null },
@@ -107,8 +123,23 @@ router.get('/:projectId', async (req: Request, res: Response) => {
 // GET /api/drive/:projectId/search?q= — search files
 router.get('/:projectId/search', async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
     const { projectId } = req.params;
     const q = String(req.query.q || '');
+
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { teamId: true },
+    });
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+    const member = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId: project.teamId } },
+    });
+    if (!member) return res.status(403).json({ success: false, message: 'Access denied' });
+
     const files = await prisma.driveFile.findMany({
       where: { projectId, OR: [{ name: { contains: q } }, { description: { contains: q } }] },
       include: { uploadedBy: { select: { name: true } }, folder: { select: { name: true } } },
@@ -123,8 +154,27 @@ router.get('/:projectId/search', async (req: Request, res: Response) => {
 // POST /api/drive/:projectId/folders — create folder
 router.post('/:projectId/folders', async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
     const { projectId } = req.params;
     const { name, parentId } = req.body;
+
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { teamId: true },
+    });
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+    const member = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId: project.teamId } },
+    });
+    if (!member) return res.status(403).json({ success: false, message: 'Access denied' });
+
+    if (!name || typeof name !== 'string') {
+      return res.status(400).json({ success: false, message: 'Folder name is required' });
+    }
+
     const folder = await prisma.driveFolder.create({
       data: { name, projectId, parentId: parentId || null },
     });
@@ -137,6 +187,26 @@ router.post('/:projectId/folders', async (req: Request, res: Response) => {
 // DELETE /api/drive/folders/:id — delete folder
 router.delete('/folders/:id', async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const folder = await prisma.driveFolder.findUnique({
+      where: { id: req.params.id },
+      select: { projectId: true },
+    });
+    if (!folder) return res.status(404).json({ success: false, message: 'Folder not found' });
+
+    const project = await prisma.project.findUnique({
+      where: { id: folder.projectId },
+      select: { teamId: true },
+    });
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+    const member = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId: project.teamId } },
+    });
+    if (!member) return res.status(403).json({ success: false, message: 'Access denied' });
+
     await prisma.driveFolder.delete({ where: { id: req.params.id } });
     res.json({ success: true, message: 'Folder deleted' });
   } catch (err: any) {
@@ -147,9 +217,31 @@ router.delete('/folders/:id', async (req: Request, res: Response) => {
 // POST /api/drive/:projectId/files — upload file to drive (Cloudinary primary, local fallback)
 router.post('/:projectId/files', handleDriveUploadSingle('file'), async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
     const { projectId } = req.params;
-    const { folderId, uploadedById, description } = req.body;
+    const { folderId, description } = req.body;
+
+    // Verify the user is a member of the target project's team
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { teamId: true },
+    });
+    if (!project) {
+      if (fs.existsSync(req.file.path)) { try { fs.unlinkSync(req.file.path); } catch (_) {} }
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+    const member = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId: project.teamId } },
+    });
+    if (!member) {
+      if (fs.existsSync(req.file.path)) { try { fs.unlinkSync(req.file.path); } catch (_) {} }
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    // ALWAYS use the authenticated user as uploader
+    const uploadedById = authReq.user.id;
 
     let fileUrl = `/uploads/${req.file.filename}`;
     let storageProvider = 'local';
@@ -173,7 +265,7 @@ router.post('/:projectId/files', handleDriveUploadSingle('file'), async (req: Re
         name: req.file.originalname,
         fileUrl,
         fileType: getFileType(req.file.mimetype),
-        fileSize: req.file.size,
+        fileSize: Number.isFinite(req.file.size) ? req.file.size : 0,
         mimeType: req.file.mimetype,
         projectId,
         folderId: folderId || null,
@@ -195,11 +287,25 @@ router.post('/:projectId/files', handleDriveUploadSingle('file'), async (req: Re
 // DELETE /api/drive/files/:id — delete drive file
 router.delete('/files/:id', async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
     const file = await prisma.driveFile.findUnique({ where: { id: req.params.id } });
     if (!file) return res.status(404).json({ success: false, message: 'File not found' });
 
+    // Verify membership on the file's project
+    const proj = await prisma.project.findUnique({
+      where: { id: file.projectId },
+      select: { teamId: true },
+    });
+    if (proj) {
+      const membership = await prisma.teamMember.findUnique({
+        where: { userId_teamId: { userId: authReq.user.id, teamId: proj.teamId } },
+      });
+      if (!membership) return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
     if (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://')) {
-      await deleteFromCloudinary(file.fileUrl);
+      await deleteFromCloudinary(file.fileUrl, file.mimeType);
     } else {
       const filePath = path.join(uploadsDir, path.basename(file.fileUrl));
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -215,8 +321,22 @@ router.delete('/files/:id', async (req: Request, res: Response) => {
 // GET /api/drive/files/:id/download — download file (redirects to Cloudinary if remote)
 router.get('/files/:id/download', async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
     const file = await prisma.driveFile.findUnique({ where: { id: req.params.id } });
     if (!file) return res.status(404).json({ success: false, message: 'File not found' });
+
+    // Verify membership on the file's project
+    const proj = await prisma.project.findUnique({
+      where: { id: file.projectId },
+      select: { teamId: true },
+    });
+    if (proj) {
+      const membership = await prisma.teamMember.findUnique({
+        where: { userId_teamId: { userId: authReq.user.id, teamId: proj.teamId } },
+      });
+      if (!membership) return res.status(403).json({ success: false, message: 'Access denied' });
+    }
 
     if (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://')) {
       return res.redirect(file.fileUrl);
@@ -231,4 +351,3 @@ router.get('/files/:id/download', async (req: Request, res: Response) => {
 });
 
 export default router;
-

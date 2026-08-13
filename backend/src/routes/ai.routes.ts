@@ -2,21 +2,19 @@ import { Router } from 'express';
 import axios from 'axios';
 import { AIService } from '../services/ai.service';
 import { GeminiKeyManager } from '../services/geminiKeyManager';
+import { AIRouterService } from '../services/aiRouter.service';
 import prisma from '../utils/prisma';
 import { authenticateJWT, AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { geminiRateLimiter } from '../middlewares/rateLimit.middleware';
 
 const router = Router();
 
-// GET /api/ai/health - Health check endpoint for Gemini API keys & failover diagnostics
-router.get('/health', (_req, res) => {
-  const health = GeminiKeyManager.getHealth();
-  return res.json({
-    status: health.status,
-    activeKeyIndex: health.activeKeyIndex,
-    exhaustedKeysCount: health.exhaustedKeysCount,
-  });
+// GET /api/ai/health - Health check endpoint for multi-provider AI Router & failover diagnostics
+router.get('/health', async (_req, res) => {
+  const report = await AIRouterService.getHealthReport();
+  return res.json(report);
 });
+
 
 // GET /api/ai/status - Lightweight Gemini connectivity probe for the UI status indicator
 router.get('/status', async (_req, res) => {
@@ -47,6 +45,15 @@ router.get('/status', async (_req, res) => {
 
 router.use(authenticateJWT);
 
+// GET /api/ai/usage - Returns user daily usage and quotas
+router.get('/usage', async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+  const usage = await AIRouterService.getUserDailyUsage(authReq.user.id);
+  res.json({ usage });
+});
+
+
 // 1. AI PLANNER API
 router.post('/planner', geminiRateLimiter, async (req, res) => {
   try {
@@ -62,7 +69,10 @@ router.post('/planner', geminiRateLimiter, async (req, res) => {
     res.json({ plan });
   } catch (error: any) {
     console.error('AI Planner Route Error:', error.message);
-    res.status(503).json({ success: false, message: 'AI service temporarily unavailable' });
+    if (error.message?.startsWith('RATE_LIMIT_EXCEEDED')) {
+      return res.status(429).json({ error: error.message });
+    }
+    res.status(503).json({ success: false, message: error.message || 'AI service temporarily unavailable' });
   }
 });
 
@@ -78,7 +88,10 @@ router.post('/analyze-docs', geminiRateLimiter, async (req, res) => {
     res.json({ analysis });
   } catch (error: any) {
     console.error('Requirement Analyzer Route Error:', error.message);
-    res.status(503).json({ success: false, message: 'AI service temporarily unavailable' });
+    if (error.message?.startsWith('RATE_LIMIT_EXCEEDED')) {
+      return res.status(429).json({ error: error.message });
+    }
+    res.status(503).json({ success: false, message: error.message || 'AI service temporarily unavailable' });
   }
 });
 
@@ -101,7 +114,10 @@ router.post('/risk-detection', geminiRateLimiter, async (req, res) => {
     res.json({ riskAnalysis });
   } catch (error: any) {
     console.error('AI Risk Detection Route Error:', error.message);
-    res.status(503).json({ success: false, message: 'AI service temporarily unavailable' });
+    if (error.message?.startsWith('RATE_LIMIT_EXCEEDED')) {
+      return res.status(429).json({ error: error.message });
+    }
+    res.status(503).json({ success: false, message: error.message || 'AI service temporarily unavailable' });
   }
 });
 

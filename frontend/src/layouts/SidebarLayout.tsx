@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { io } from 'socket.io-client';
 import { useAuthStore } from '../store/auth.store';
 import {
   LayoutDashboard, Users, FolderOpen, MessageSquare, Zap, Bell,
   Settings as SettingsIcon, Search, ShieldAlert, Menu, X,
   CheckSquare, BarChart3, Github, CalendarDays, HardDrive,
-  FileBarChart, Users2, ArrowRight, Loader2, Mail, Lock
+  FileBarChart, Users2, ArrowRight, Loader2, Mail, Lock, BrainCircuit
 } from 'lucide-react';
 import GlobalSearch from '../components/GlobalSearch';
 import AccountSwitcher from '../components/AccountSwitcher';
@@ -16,12 +17,16 @@ interface SidebarLayoutProps { children: React.ReactNode; }
 export default function SidebarLayout({ children }: SidebarLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { addAccount } = useAuthStore();
+  const { addAccount, accessToken, updateUser } = useAuthStore();
+  const activeUserId = useAuthStore((s) => s.user?.id);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [aiStatus, setAiStatus] = useState<'online' | 'slow' | 'unavailable'>('unavailable');
+  const [activeProvider, setActiveProvider] = useState<'gemini' | 'groq' | 'openai'>('gemini');
+  const [notifs, setNotifs] = useState<any[]>([]);
+
 
   // Add account modal state
   const [addEmail, setAddEmail] = useState('');
@@ -29,10 +34,59 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState('');
 
-  const notifs = [
-    { id: 1, title: 'Task Assigned', message: 'You have a new task assigned', isRead: false },
-    { id: 2, title: 'Deadline Approaching', message: 'Sprint milestone ends in 2 days', isRead: false },
-  ];
+  // Bootstrap full profile into store on mount (so sidebar name/avatar is always fresh)
+  useEffect(() => {
+    if (!accessToken) return;
+    api.get('/auth/profile')
+      .then(res => {
+        const u = res.data.user;
+        if (!u) return;
+        updateUser({
+          name: u.name,
+          avatarUrl: u.avatarUrl,
+          bio: u.bio,
+          github: u.github,
+          linkedin: u.linkedin,
+          phone: u.phone,
+          githubUsername: u.githubUsername,
+          skills: Array.isArray(u.skills) ? u.skills : [],
+        });
+      })
+      .catch(() => { /* non-critical, ignore */ });
+  }, [accessToken, activeUserId]);
+
+  // Fetch real notifications and listen for real-time push socket events
+  useEffect(() => {
+    let mounted = true;
+    api.get('/misc/notifications')
+      .then(res => {
+        if (mounted) setNotifs(res.data.notifications || []);
+      })
+      .catch(err => console.error('Failed to load notifications:', err));
+
+    if (!accessToken) return;
+
+    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '');
+    if (!apiBase) return;
+    const WS_URL = apiBase.replace(/\/api$/, '');
+    const socket = io(WS_URL, {
+      auth: { token: accessToken },
+      transports: ['websocket', 'polling'],
+    });
+
+    socket.on('notification:new', (newNotif: any) => {
+      if (mounted) {
+        setNotifs(prev => [newNotif, ...prev]);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      socket.disconnect();
+    };
+  }, [accessToken]);
+
+  const unreadCount = notifs.filter(n => !n.isRead).length;
 
   // Cmd+K / Ctrl+K global shortcut
   useEffect(() => {
@@ -48,9 +102,14 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
 
   useEffect(() => {
     let mounted = true;
-    api.get('/ai/status')
+    api.get('/ai/health')
       .then((response) => {
-        if (mounted) setAiStatus(response.data.status);
+        if (mounted) {
+          setAiStatus('online');
+          if (response.data?.activeProvider) {
+            setActiveProvider(response.data.activeProvider);
+          }
+        }
       })
       .catch(() => {
         if (mounted) setAiStatus('unavailable');
@@ -58,12 +117,21 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
     return () => { mounted = false; };
   }, []);
 
+  const aiProviderLabels = {
+    gemini: { label: 'Gemini AI', badgeCls: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
+    groq: { label: 'Groq', badgeCls: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' },
+    openai: { label: 'OpenAI GPT', badgeCls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+  } as const;
+
+  const currentProviderConfig = aiProviderLabels[activeProvider] || aiProviderLabels.gemini;
+
   const aiStatusConfig = {
-    online: { label: 'AI Online', dot: 'bg-emerald-500', text: 'text-emerald-500' },
-    slow: { label: 'AI Slow', dot: 'bg-amber-400', text: 'text-amber-500' },
-    unavailable: { label: 'AI Unavailable', dot: 'bg-red-500', text: 'text-red-500' },
+    online: { label: currentProviderConfig.label, dot: 'bg-emerald-500', text: 'text-emerald-400' },
+    slow: { label: `${currentProviderConfig.label} (Slow)`, dot: 'bg-amber-400', text: 'text-amber-400' },
+    unavailable: { label: 'AI Offline', dot: 'bg-red-500', text: 'text-red-400' },
   } as const;
   const currentAiStatus = aiStatusConfig[aiStatus];
+
 
   const menuGroups = [
     {
@@ -72,7 +140,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
         { name: 'Dashboard', path: '/', icon: LayoutDashboard },
         { name: 'Analytics', path: '/analytics', icon: BarChart3 },
         { name: 'Member Analytics', path: '/analytics/members', icon: Users2 },
-        { name: 'Notifications', path: '/notifications', icon: Bell, badge: 2 },
+        { name: 'Notifications', path: '/notifications', icon: Bell, badge: unreadCount },
       ],
     },
     {
@@ -91,6 +159,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       label: 'Intelligence',
       items: [
         { name: 'AI Planner', path: '/ai', icon: Zap },
+        { name: 'AI Project Manager', path: '/ai-pm', icon: BrainCircuit },
         { name: 'GitHub', path: '/github', icon: Github },
         { name: 'Reports', path: '/reports', icon: FileBarChart },
       ],
@@ -273,12 +342,18 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
 
         {/* Account Switcher Footer */}
         <div className="pt-4 border-t border-border mt-auto">
-          <div className={`mb-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-secondary/40 text-xs font-bold ${currentAiStatus.text}`}>
-            <span className={`w-2 h-2 rounded-full ${currentAiStatus.dot} ${aiStatus === 'online' ? 'animate-pulse' : ''}`} />
-            {currentAiStatus.label}
+          <div className={`mb-3 flex items-center justify-between px-3 py-2 rounded-xl bg-secondary/40 border border-border text-xs font-semibold ${currentAiStatus.text}`}>
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${currentAiStatus.dot} ${aiStatus === 'online' ? 'animate-pulse' : ''}`} />
+              <span>{currentAiStatus.label}</span>
+            </div>
+            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase border ${currentProviderConfig.badgeCls}`}>
+              {activeProvider}
+            </span>
           </div>
           <AccountSwitcher onAddAccount={() => setShowAddAccount(true)} />
         </div>
+
       </aside>
 
       {/* Main Frame */}
@@ -300,8 +375,15 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
 
           {/* Right Controls */}
           <div className="flex items-center gap-3 relative">
+            {/* AI Provider Indicator Badge */}
+            <div className={`px-2.5 py-1 rounded-xl text-xs font-semibold border flex items-center gap-1.5 ${currentProviderConfig.badgeCls}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${currentAiStatus.dot}`} />
+              <span>{currentProviderConfig.label}</span>
+            </div>
+
             {/* Notifications */}
             <div className="relative">
+
               <button onClick={() => setShowNotifMenu(!showNotifMenu)}
                 className="p-2 rounded-xl hover:bg-secondary border border-transparent hover:border-border text-muted-foreground hover:text-foreground transition-all relative">
                 <Bell className="w-4 h-4" />

@@ -115,7 +115,8 @@ export default function Drive() {
       window.open(url, '_blank');
     } else {
       // Local/legacy file
-      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+      const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '');
+      if (!apiBase) return;
       window.open(`${apiBase}/files/${file.id}/preview`, '_blank');
     }
   };
@@ -126,9 +127,12 @@ export default function Drive() {
    * Falls back to window.open if fetch fails (CORS or network error).
    */
   const downloadFile = async (file: DriveFile) => {
+    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '');
+    if (!apiBase && !(file.fileUrl && (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://')))) return;
+
     const url = file.fileUrl && (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://'))
       ? file.fileUrl
-      : `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/files/${file.id}/download`;
+      : `${apiBase}/files/${file.id}/download`;
 
     try {
       const response = await fetch(url);

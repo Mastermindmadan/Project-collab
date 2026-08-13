@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { sendNotificationToUser } from '../utils/socket';
 
 export const getNotifications = async (req: Request, res: Response) => {
   try {
@@ -147,13 +148,14 @@ export const createMeeting = async (req: Request, res: Response) => {
     const formattedTime = new Date(dateTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 
     for (const member of teamMembers) {
-      await prisma.notification.create({
+      const notif = await prisma.notification.create({
         data: {
           userId: member.userId,
           title: 'New Meeting Scheduled',
           message: `Meeting "${meeting.title}" scheduled for ${formattedTime} in project "${project.title}". Link: ${link}`
         }
       });
+      sendNotificationToUser(member.userId, notif);
     }
 
     res.status(201).json({ message: 'Meeting scheduled successfully', meeting });

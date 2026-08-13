@@ -2,6 +2,12 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import prisma from '../utils/prisma';
 
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET must be set in environment variables.');
+}
+
 export interface AuthenticatedRequest extends Request {
   user?: {
     id: string;
@@ -18,7 +24,7 @@ export const authenticateJWT = async (req: Request, res: Response, next: NextFun
     const token = authHeader.split(' ')[1];
 
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'super-secret-key-projectcollab-ai-2026-xyz-abc') as {
+      const decoded = jwt.verify(token, JWT_SECRET) as {
         id: string;
         email: string;
         name: string;

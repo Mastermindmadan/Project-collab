@@ -182,7 +182,9 @@ export const getMyTeams = async (req: Request, res: Response) => {
                   select: {
                     id: true,
                     name: true,
-                    avatarUrl: true
+                    email: true,
+                    avatarUrl: true,
+                    githubUsername: true
                   }
                 }
               }

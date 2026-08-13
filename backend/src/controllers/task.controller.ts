@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { sendNotificationToUser } from '../utils/socket';
 
 export const createTask = async (req: Request, res: Response) => {
   try {
@@ -60,13 +61,14 @@ export const createTask = async (req: Request, res: Response) => {
 
     // Notify assignee if set
     if (assigneeId && assigneeId !== authReq.user.id) {
-      await prisma.notification.create({
+      const notif = await prisma.notification.create({
         data: {
           userId: assigneeId,
           title: 'New Task Assigned',
           message: `You have been assigned the task: "${task.title}" in project "${project.title}"`
         }
       });
+      sendNotificationToUser(assigneeId, notif);
     }
 
     res.status(201).json({ message: 'Task created successfully', task });
@@ -140,13 +142,14 @@ export const updateTask = async (req: Request, res: Response) => {
 
     // Notify on new assignee
     if (assigneeId && assigneeId !== previousAssigneeId && assigneeId !== authReq.user.id) {
-      await prisma.notification.create({
+      const notif = await prisma.notification.create({
         data: {
           userId: assigneeId,
           title: 'Task Assigned',
           message: `You have been assigned the task: "${updatedTask.title}"`
         }
       });
+      sendNotificationToUser(assigneeId, notif);
     }
 
     res.json({ message: 'Task updated successfully', task: updatedTask });
@@ -317,6 +320,19 @@ export const addTaskComment = async (req: Request, res: Response) => {
         }
       }
     });
+
+    // Notify assignee if assigned and commenter is not the assignee
+    if (task.assigneeId && task.assigneeId !== authReq.user.id) {
+      const snippet = content.length > 50 ? content.substring(0, 50) + '...' : content;
+      const notif = await prisma.notification.create({
+        data: {
+          userId: task.assigneeId,
+          title: `New Comment on "${task.title}"`,
+          message: `${authReq.user.name}: "${snippet}"`
+        }
+      });
+      sendNotificationToUser(task.assigneeId, notif);
+    }
 
     res.status(201).json({ message: 'Comment added successfully', comment });
   } catch (error) {

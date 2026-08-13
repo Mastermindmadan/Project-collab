@@ -9,6 +9,21 @@ import { getAllowedOrigins, isOriginAllowed } from './config/cors';
 // Load environment variables
 dotenv.config();
 
+// ─── Startup Environment Validation ─────────────────────────────────────────
+// Fail fast in production if critical secrets are missing, so the server doesn't
+// boot with insecure defaults (e.g. predictable JWT secrets).
+const requiredEnv = ['DATABASE_URL', 'JWT_SECRET', 'ALLOWED_ORIGINS', 'FRONTEND_URL'];
+const missingEnv = requiredEnv.filter(k => !process.env[k]);
+if ((process.env.NODE_ENV || 'development') === 'production') {
+  if (missingEnv.length) throw new Error(`FATAL: Missing required env vars: ${missingEnv.join(', ')}`);
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'super-secret-key-projectcollab-ai-2026-xyz-abc') {
+    throw new Error('FATAL: JWT_SECRET is unset or still using the insecure default. Set a strong random secret.');
+  }
+  if (!process.env.JWT_REFRESH_SECRET || process.env.JWT_REFRESH_SECRET === 'super-secret-refresh-key-projectcollab-ai-2026-xyz-abc') {
+    throw new Error('FATAL: JWT_REFRESH_SECRET is unset or still using the insecure default. Set a strong random secret.');
+  }
+}
+
 // Imports routers
 import authRoutes from './routes/auth.routes';
 import teamRoutes from './routes/team.routes';
@@ -25,9 +40,14 @@ import reportsRoutes from './routes/reports.routes';
 import chatRoutes from './routes/chat.routes';
 
 import filesRoutes from './routes/files.routes';
+import aipmRoutes from './routes/aipm.routes';
+
 
 // Import Socket helper
 import { initChatSocket } from './sockets/chat.socket';
+import { setIO } from './utils/socket';
+import { startDeadlineReminderCron } from './services/reminder.service';
+import prisma from './utils/prisma';
 
 const app = express();
 const server = http.createServer(app);
@@ -35,11 +55,13 @@ const server = http.createServer(app);
 // Configure Socket.io
 const allowedOrigins = getAllowedOrigins();
 const io = new Server(server, {
+  transports: ['websocket', 'polling'],
   cors: {
     origin: allowedOrigins,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
   },
 });
+setIO(io);
 
 // Configure Express middlewares
 app.use(
@@ -51,6 +73,7 @@ app.use(
         callback(null, false);
       }
     },
+    credentials: true,
   })
 );
 app.use(express.json());
@@ -92,15 +115,34 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api', miscRoutes);
 app.use('/api/misc', miscRoutes);
+app.use('/api/ai-pm', aipmRoutes);
+
 
 // Initialize Socket.io chat behaviors
 initChatSocket(io);
 
+// Initialize Deadline Reminders Cron
+startDeadlineReminderCron();
+
 // Start the server
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`====================================================`);
-  console.log(`🚀 ProjectCollab AI server running on port ${PORT}`);
-  console.log(`📁 Uploads served at /uploads`);
-  console.log(`====================================================`);
+
+const shutdown = async (signal: string) => {
+  console.log(`Received ${signal}. Shutting down gracefully...`);
+  server.close(async () => {
+    await prisma.$disconnect();
+    process.exit(0);
+  });
+};
+
+void prisma.$connect().then(() => {
+  server.listen(PORT, () => {
+    console.log(`====================================================`);
+    console.log(`🚀 ProjectCollab AI server running on port ${PORT}`);
+    console.log(`📁 Uploads served at /uploads`);
+    console.log(`====================================================`);
+  });
 });
+
+process.on('SIGINT', () => { void shutdown('SIGINT'); });
+process.on('SIGTERM', () => { void shutdown('SIGTERM'); });

@@ -3,6 +3,7 @@ import { GitHubService } from '../services/github.service';
 import prisma from '../utils/prisma';
 import { authenticateJWT, AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { geminiRateLimiter } from '../middlewares/rateLimit.middleware';
+import { syncGitHub, getActivityFeed, downloadGitHubReport } from '../controllers/githubSync.controller';
 
 const router = Router();
 
@@ -133,5 +134,14 @@ router.post('/link-repo', async (req, res) => {
     res.status(500).json({ error: 'Failed to link GitHub repository' });
   }
 });
+
+// 6. SYNC GITHUB DATA
+router.post('/sync/:projectId', syncGitHub);
+
+// 7. ACTIVITY FEED
+router.get('/activity/:projectId', getActivityFeed);
+
+// 8. DOWNLOAD PDF REPORT
+router.get('/report/:projectId', downloadGitHubReport);
 
 export default router;

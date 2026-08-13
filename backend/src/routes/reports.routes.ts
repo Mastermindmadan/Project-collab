@@ -1,16 +1,22 @@
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../utils/prisma';
+import { authenticateJWT, AuthenticatedRequest } from '../middlewares/auth.middleware';
 
 const router = Router();
-const prisma = new PrismaClient();
+
+// All report routes require authentication
+router.use(authenticateJWT);
 
 // GET /api/reports/project/:id — structured project report data
 router.get('/project/:id', async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
     const project = await prisma.project.findUnique({
       where: { id: req.params.id },
       include: {
-        team: { include: { members: { include: { user: { select: { id: true, name: true, email: true } } } } } },
+        team: { include: { members: { include: { user: { select: { id: true, name: true } } } } } },
         tasks: { include: { assignee: { select: { name: true } }, oldSubtasks: true } },
         milestones: true,
         meetings: true,
@@ -19,6 +25,12 @@ router.get('/project/:id', async (req: Request, res: Response) => {
       },
     });
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+    // Verify the requester is a member of the project's team
+    const membership = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId: project.teamId } },
+    });
+    if (!membership) return res.status(403).json({ success: false, message: 'Access denied' });
 
     const tasksByStatus = {
       TODO: project.tasks.filter(t => t.status === 'TODO').length,
@@ -31,7 +43,6 @@ router.get('/project/:id', async (req: Request, res: Response) => {
       const assigned = project.tasks.filter(t => t.assigneeId === m.userId);
       return {
         name: m.user.name,
-        email: m.user.email,
         role: m.role,
         assigned: assigned.length,
         completed: assigned.filter(t => t.status === 'COMPLETED').length,
@@ -59,14 +70,23 @@ router.get('/project/:id', async (req: Request, res: Response) => {
 // GET /api/reports/team/:id — team report data
 router.get('/team/:id', async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
     const team = await prisma.team.findUnique({
       where: { id: req.params.id },
       include: {
-        members: { include: { user: { select: { id: true, name: true, email: true } } } },
+        members: { include: { user: { select: { id: true, name: true } } } },
         projects: { include: { tasks: true, milestones: true } },
       },
     });
     if (!team) return res.status(404).json({ success: false, message: 'Team not found' });
+
+    // Verify the requester is a member of the team
+    const membership = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId: req.params.id } },
+    });
+    if (!membership) return res.status(403).json({ success: false, message: 'Access denied' });
 
     const projectSummaries = team.projects.map(p => ({
       id: p.id, title: p.title, status: p.status, healthScore: p.healthScore,
@@ -81,7 +101,7 @@ router.get('/team/:id', async (req: Request, res: Response) => {
       report: {
         team: { id: team.id, name: team.name, memberCount: team.members.length, projectCount: team.projects.length },
         projects: projectSummaries,
-        members: team.members.map(m => ({ name: m.user.name, email: m.user.email, role: m.role })),
+        members: team.members.map(m => ({ name: m.user.name, role: m.role })),
         generatedAt: new Date().toISOString(),
       },
     });
@@ -93,12 +113,38 @@ router.get('/team/:id', async (req: Request, res: Response) => {
 // GET /api/reports/tasks?projectId= — task report data
 router.get('/tasks', async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
     const { projectId } = req.query;
-    const where = projectId ? { projectId: String(projectId) } : {};
+    let where: any = {};
+
+    if (projectId) {
+      const pid = String(projectId);
+      // Verify membership on the requested project
+      const proj = await prisma.project.findUnique({
+        where: { id: pid },
+        select: { teamId: true },
+      });
+      if (!proj) return res.status(404).json({ success: false, message: 'Project not found' });
+      const membership = await prisma.teamMember.findUnique({
+        where: { userId_teamId: { userId: authReq.user.id, teamId: proj.teamId } },
+      });
+      if (!membership) return res.status(403).json({ success: false, message: 'Access denied' });
+      where = { projectId: pid };
+    } else {
+      // Scope to the user's own team projects
+      const teamIds = (await prisma.teamMember.findMany({
+        where: { userId: authReq.user.id },
+        select: { teamId: true },
+      })).map(tm => tm.teamId);
+      where = { project: { teamId: { in: teamIds } } };
+    }
+
     const tasks = await prisma.task.findMany({
       where,
       include: {
-        assignee: { select: { name: true, email: true } },
+        assignee: { select: { name: true } },
         project: { select: { title: true } },
         oldSubtasks: true,
       },
@@ -125,13 +171,30 @@ router.get('/tasks', async (req: Request, res: Response) => {
 // GET /api/reports/members?teamId= — per-member analytics data
 router.get('/members', async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
     const { teamId } = req.query;
-    const where = teamId ? { teamId: String(teamId) } : {};
+    let where: any = {};
+
+    if (teamId) {
+      const tid = String(teamId);
+      // Verify the requester is a member of the requested team
+      const membership = await prisma.teamMember.findUnique({
+        where: { userId_teamId: { userId: authReq.user.id, teamId: tid } },
+      });
+      if (!membership) return res.status(403).json({ success: false, message: 'Access denied' });
+      where = { teamId: tid };
+    } else {
+      // Scope to the user's own teams
+      where = { userId: authReq.user.id };
+    }
+
     const members = await prisma.teamMember.findMany({
       where,
       include: {
         user: {
-          select: { id: true, name: true, email: true, avatarUrl: true },
+          select: { id: true, name: true, avatarUrl: true },
         },
         team: { select: { name: true } },
       },
@@ -148,7 +211,7 @@ router.get('/members', async (req: Request, res: Response) => {
       const productivity = tasks.length > 0 ? Math.round((completed / tasks.length) * 100) : 0;
 
       return {
-        userId: m.userId, name: m.user.name, email: m.user.email, avatarUrl: m.user.avatarUrl,
+                userId: m.userId, name: m.user.name, avatarUrl: m.user.avatarUrl,
         team: m.team.name, role: m.role,
         totalTasks: tasks.length, completed, inProgress, overdue, productivity,
       };

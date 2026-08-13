@@ -1,6 +1,8 @@
 import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
 import fs from 'fs';
 
+type CloudinaryResourceType = 'image' | 'raw' | 'video';
+
 // Configure Cloudinary credentials
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -87,7 +89,9 @@ export function extractPublicIdFromUrl(url: string): string | null {
   if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) return null;
   const parts = url.split('/upload/');
   if (parts.length < 2) return null;
-  return parts[1].replace(/^v\d+\//, '');
+  // Cloudinary URLs include the delivery format (for example, `.png`), but
+  // `uploader.destroy` requires the public ID without that extension.
+  return parts[1].replace(/^v\d+\//, '').replace(/\.[^/.]+$/, '');
 }
 
 /**
@@ -95,7 +99,7 @@ export function extractPublicIdFromUrl(url: string): string | null {
  */
 export async function deleteFromCloudinary(
   urlOrPublicId: string,
-  resourceType: 'image' | 'raw' | 'video' = 'raw'
+  mimeType?: string | null
 ): Promise<boolean> {
   if (!isCloudinaryConfigured() || !urlOrPublicId) return false;
 
@@ -106,8 +110,18 @@ export async function deleteFromCloudinary(
       if (extracted) publicId = extracted;
     }
 
-    await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
-    return true;
+    // A Cloudinary delivery URL contains the exact resource type used at
+    // upload time. For a bare public ID, mirror this app's upload mapping.
+    const urlResourceType = urlOrPublicId.match(/\/(image|video|raw)\/upload\//i)?.[1]?.toLowerCase();
+    const resourceType: CloudinaryResourceType =
+      urlResourceType === 'image' || urlResourceType === 'video' || urlResourceType === 'raw'
+        ? urlResourceType
+        : mimeType?.startsWith('video/') || mimeType?.startsWith('audio/')
+          ? 'video'
+          : 'image';
+
+    const result = await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+    return result.result === 'ok';
   } catch (err) {
     console.warn('[Cloudinary] Delete failed:', err);
     return false;
