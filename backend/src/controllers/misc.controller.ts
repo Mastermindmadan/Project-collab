@@ -58,7 +58,7 @@ export const getActiveSessions = async (req: Request, res: Response) => {
         avatarUrl: profile?.avatarUrl || null,
         device: 'Browser',
         location: 'Current session',
-        current: u.userId === authReq.user.id,
+        current: u.userId === authReq.user!.id,
         lastActive: u.lastActive,
       };
     });
