@@ -277,6 +277,13 @@ export class AIRouterService {
         groq: this.groqProvider.isAvailable(),
         openai: this.openAIProvider.isAvailable(),
       },
+      // Whether each provider has a key configured in the environment (presence
+      // only — actual keys are NEVER exposed to the frontend).
+      configuredProviders: {
+        gemini: GeminiKeyManager.getKeys().length > 0,
+        groq: Boolean(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.trim()),
+        openai: Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim()),
+      },
     };
   }
 }

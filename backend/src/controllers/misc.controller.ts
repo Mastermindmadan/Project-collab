@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { sendNotificationToUser } from '../utils/socket';
+import { getOnlineUsersSnapshot } from '../sockets/chat.socket';
 
 export const getNotifications = async (req: Request, res: Response) => {
   try {
@@ -16,6 +17,53 @@ export const getNotifications = async (req: Request, res: Response) => {
     });
 
     res.json({ notifications });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
+/**
+ * GET /api/misc/sessions
+ * Returns the currently-active (online) user sessions from the real-time socket
+ * presence layer. Falls back to a clean empty list when no presence data exists.
+ */
+export const getActiveSessions = async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const online = getOnlineUsersSnapshot();
+
+    // Enrich each online user with database-backed profile fields.
+    const userIds = online.map((u) => u.userId);
+    const profiles = userIds.length
+      ? await prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, name: true, email: true, avatarUrl: true },
+        })
+      : [];
+
+    const profileMap = new Map(profiles.map((p) => [p.id, p]));
+
+    const sessions = online.map((u) => {
+      const profile = profileMap.get(u.userId);
+      return {
+        id: `${u.userId}-${u.lastActive.getTime()}`,
+        userId: u.userId,
+        name: profile?.name || u.name,
+        email: profile?.email || null,
+        avatarUrl: profile?.avatarUrl || null,
+        device: 'Browser',
+        location: 'Current session',
+        current: u.userId === authReq.user.id,
+        lastActive: u.lastActive,
+      };
+    });
+
+    res.json({ sessions });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal Server Error' });

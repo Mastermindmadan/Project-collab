@@ -2,7 +2,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import prisma from '../utils/prisma';
 
-export async function generateGitHubReport(projectId: string) {
+export async function generateGitHubReport(projectId: string): Promise<Buffer> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     include: {
@@ -158,8 +158,12 @@ export async function generateGitHubReport(projectId: string) {
     `Last synced: ${project.lastGitSync ? new Date(project.lastGitSync).toLocaleString() : 'Never'}.`,
   ].join(' ');
 
-  const splitSummary = doc.splitTextToSize(summaryText, 180);
+    const splitSummary = doc.splitTextToSize(summaryText, 180);
   doc.text(splitSummary, 14, y);
 
-  doc.save(`projectcollab-github-report-${project.title.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}.pdf`);
+  // Return the PDF as a binary Buffer so the controller can stream it with the
+  // proper Content-Type / Content-Disposition headers. (doc.save() only writes
+  // to disk on the server and does NOT return the file content.)
+  const arrayBuffer = doc.output('arraybuffer');
+  return Buffer.from(arrayBuffer);
 }

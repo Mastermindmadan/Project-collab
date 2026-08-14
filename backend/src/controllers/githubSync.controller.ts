@@ -80,7 +80,7 @@ export const downloadGitHubReport = async (req: Request, res: Response) => {
 
     const project = await prisma.project.findUnique({
       where: { id: projectId },
-      select: { teamId: true },
+      select: { teamId: true, title: true },
     });
 
     if (!project) return res.status(404).json({ error: 'Project not found' });
@@ -91,9 +91,15 @@ export const downloadGitHubReport = async (req: Request, res: Response) => {
 
     if (!membership) return res.status(403).json({ error: 'Access denied' });
 
-    await generateGitHubReport(projectId);
+    const pdfBuffer = await generateGitHubReport(projectId);
 
-    res.json({ message: 'Report generated and downloaded' });
+    // Stream the actual PDF bytes with the correct headers so the file opens
+    // correctly in Windows, Android and iOS PDF viewers.
+    const safeTitle = (project.title || 'report').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="github-report-${safeTitle}-${Date.now()}.pdf"`);
+    res.setHeader('Content-Length', String(pdfBuffer.length));
+    res.send(pdfBuffer);
   } catch (error: any) {
     console.error('Report generation error:', error);
     res.status(500).json({ error: error.message || 'Failed to generate report' });

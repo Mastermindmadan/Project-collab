@@ -82,6 +82,24 @@ export default function AppSettings() {
   const [loadingAiStats, setLoadingAiStats] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
+  // ── Active Sessions state (real data, not mock) ─────────────────────────────
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+
+  const fetchSessions = () => {
+    setSessionsLoading(true);
+    api
+      .get('/misc/sessions')
+      .then((res) => setSessions(res.data?.sessions || []))
+      .catch(() => setSessions([]))
+      .finally(() => setSessionsLoading(false));
+  };
+
+  useEffect(() => {
+    if (activeSection !== 'security') return;
+    fetchSessions();
+  }, [activeSection]);
+
   const fetchAiStats = () => {
     setLoadingAiStats(true);
     setAiError(null);
@@ -521,6 +539,7 @@ export default function AppSettings() {
                         },
                       ].map((p, idx) => {
                         const isCurrentActive = aiHealth?.activeProvider === p.key;
+                        const isConfigured = aiHealth?.configuredProviders?.[p.key] ?? false;
                         const isAvailable = aiHealth?.availableProviders?.[p.key] ?? false;
                         return (
                           <div key={p.key} className={`p-4 rounded-xl border relative ${p.cls}`}>
@@ -533,8 +552,10 @@ export default function AppSettings() {
                                 <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-extrabold flex items-center gap-1 border border-emerald-500/30">
                                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Active
                                 </span>
-                              ) : isAvailable ? (
-                                <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px] font-semibold">Standby</span>
+                              ) : isAvailable && isConfigured ? (
+                                <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[10px] font-semibold">Configured</span>
+                              ) : isConfigured ? (
+                                <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 text-[10px] font-semibold">Key Set</span>
                               ) : (
                                 <span className="px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 text-[10px] font-semibold">No Key</span>
                               )}
@@ -719,20 +740,45 @@ export default function AppSettings() {
                 <p className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
                   <Globe className="w-4 h-4 text-blue-400" /> Active Sessions
                 </p>
-                {[
-                  { device: 'Chrome on Windows 11', location: 'Mumbai, India', current: true },
-                  { device: 'Safari on iPhone 15', location: 'Mumbai, India', current: false },
-                ].map((session) => (
-                  <div key={session.device} className="flex items-center justify-between p-3 rounded-xl glass-card mb-2">
-                    <div>
-                      <p className="text-xs font-medium text-white">{session.device}</p>
-                      <p className="text-xs text-slate-500">{session.location} {session.current && '· Current session'}</p>
-                    </div>
-                    {!session.current && (
-                      <button className="text-xs text-red-400 hover:text-red-300 transition-colors">Revoke</button>
-                    )}
+                {sessionsLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-slate-400 p-3">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Loading active sessions...
                   </div>
-                ))}
+                ) : sessions.length > 0 ? (
+                  sessions.map((session: any) => (
+                    <div key={session.id} className="flex items-center justify-between p-3 rounded-xl glass-card mb-2">
+                      <div className="flex items-center gap-3 min-w-0">
+                        {session.avatarUrl ? (
+                          <img src={session.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
+                            {(session.name || '?').charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-white truncate">{session.name || 'User'}</p>
+                          <p className="text-xs text-slate-500 truncate">
+                            {session.location}
+                            {session.email ? ` · ${session.email}` : ''}
+                            {session.current && ' · Current session'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                        <span className="text-[11px] text-slate-500 whitespace-nowrap">Active just now</span>
+                        {!session.current && (
+                          <button className="text-xs text-red-400 hover:text-red-300 transition-colors">Revoke</button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center p-6 glass-card rounded-xl">
+                    <Globe className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+                    <p className="text-sm font-medium text-white">No active sessions</p>
+                    <p className="text-xs text-slate-500 mt-1">Open the app in a browser tab to see your active session here.</p>
+                  </div>
+                )}
               </div>
             </div>
           )}

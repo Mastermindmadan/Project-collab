@@ -117,6 +117,20 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
     return () => { mounted = false; };
   }, []);
 
+  // Lock body scroll while the mobile drawer is open to prevent background scrolling
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const original = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = original; };
+  }, [mobileOpen]);
+
+  // Close the mobile drawer when navigating away
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
+
+
   const aiProviderLabels = {
     gemini: { label: 'Gemini AI', badgeCls: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
     groq: { label: 'Groq', badgeCls: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' },
@@ -297,6 +311,15 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
         </div>
       </div>
 
+      {/* Mobile drawer backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* Sidebar Panel */}
       <aside className={`
         fixed inset-y-0 left-0 z-50 w-64 glass-panel border-r border-border p-5 flex flex-col transition-transform duration-300 md:translate-x-0 md:static md:h-screen md:sticky md:top-0
@@ -414,7 +437,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 p-6 lg:p-8">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-x-hidden">
           {children}
         </main>
       </div>

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { toast } from 'sonner';
 import { useAuthStore } from '../store/auth.store';
 
 const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '');
@@ -9,6 +10,7 @@ if (!API_URL) {
 
 const api = axios.create({
   baseURL: API_URL,
+  timeout: 15000, // 15s request timeout: prevents pages from "loading forever" when the backend is down/slow
   headers: {
     'Content-Type': 'application/json'
   }
@@ -32,6 +34,21 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
     const status = error.response?.status;
+
+    // Backend unreachable / request timed out → surface a friendly message so
+    // the user isn't left staring at an eternal loading spinner.
+    const isNetworkFailure = !error.response;
+    const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
+    if (isNetworkFailure || isTimeout) {
+      if (!(originalRequest?._retry as boolean)) {
+        toast.error(
+          isTimeout
+            ? 'The server took too long to respond. Please try again.'
+            : 'Cannot reach the server. Please check your connection and try again.'
+        );
+      }
+      return Promise.reject(error);
+    }
 
     // Check if error is 401 (Unauthorized) or 403 (Forbidden) and we haven't retried yet
     if ((status === 401 || status === 403) && originalRequest && !originalRequest._retry) {

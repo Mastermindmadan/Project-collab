@@ -57,7 +57,7 @@ export default function Reports() {
       else if (selectedType === 'members') res = await api.get(`/reports/members?teamId=${selectedId}`);
       else if (selectedType === 'github') {
         const githubRes = await api.get(`/github/report/${selectedId}`, { responseType: 'blob' });
-        const url = window.URL.createObjectURL(new Blob([githubRes.data]));
+        const url = window.URL.createObjectURL(new Blob([githubRes.data], { type: 'application/pdf' }));
         const link = document.createElement('a');
         link.href = url;
         link.setAttribute('download', `github-report-${selectedId}-${Date.now()}.pdf`);

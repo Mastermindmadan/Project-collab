@@ -1,5 +1,6 @@
 import React, { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import { useAuthStore } from './store/auth.store';
 import SidebarLayout from './layouts/SidebarLayout';
 
@@ -58,6 +59,7 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
 export default function App() {
   return (
     <BrowserRouter>
+      <Toaster position="top-center" theme="dark" richColors toastOptions={{ style: { fontSize: '0.85rem', fontFamily: 'Inter, sans-serif' } }} />
       <Suspense fallback={<PageLoader />}>
         <Routes>
           {/* Public auth routes */}

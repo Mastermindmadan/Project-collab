@@ -230,3 +230,27 @@ const broadcastTeamPresence = (io: Server, teamId: string) => {
   const members = Array.from(onlineUsers.values()).filter((u) => u.teamId === teamId);
   io.to(`team:${teamId}`).emit('online-team-members', members);
 };
+
+/**
+ * Returns a snapshot of all currently connected (online) users keyed by userId,
+ * with the socket that connected most recently. Used by the "Active Sessions"
+ * endpoint so the UI reflects real-time presence instead of mock data.
+ */
+export function getOnlineUsersSnapshot(): Array<{
+  userId: string;
+  name: string;
+  lastActive: Date;
+}> {
+  const byUser = new Map<string, { session: ActiveUser; connectedAt: number }>();
+  for (const session of onlineUsers.values()) {
+    const existing = byUser.get(session.userId);
+    if (!existing) {
+      byUser.set(session.userId, { session, connectedAt: Date.now() });
+    }
+  }
+  return Array.from(byUser.values()).map(({ session }) => ({
+    userId: session.userId,
+    name: session.name,
+    lastActive: new Date(byUser.get(session.userId)!.connectedAt),
+  }));
+}

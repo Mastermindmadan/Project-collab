@@ -215,7 +215,7 @@ export default function GitHubIntegration() {
     if (!selectedProjectId) return;
     try {
       const res = await api.get(`/github/report/${selectedProjectId}`, { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
       const link = document.createElement('a');
       link.href = url;
       link.setAttribute('download', `github-report-${selectedProjectId}.pdf`);
