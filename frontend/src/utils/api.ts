@@ -8,9 +8,31 @@ if (!API_URL) {
   throw new Error('VITE_API_URL must be configured for production builds.');
 }
 
+const getStoredAccessToken = (): string | null => {
+  if (typeof window === 'undefined') {
+    return useAuthStore.getState().accessToken ?? null;
+  }
+
+  try {
+    const activeId = localStorage.getItem('pcai-active-account');
+    const accountsRaw = localStorage.getItem('pcai-accounts');
+    const activeToken = useAuthStore.getState().accessToken;
+
+    if (!accountsRaw) {
+      return activeToken ?? null;
+    }
+
+    const accounts = JSON.parse(accountsRaw) as Array<{ id: string; accessToken?: string }>;
+    const foundAccount = activeId ? accounts.find((account) => account.id === activeId) : accounts[0];
+    return foundAccount?.accessToken ?? activeToken ?? null;
+  } catch {
+    return useAuthStore.getState().accessToken ?? null;
+  }
+};
+
 const api = axios.create({
   baseURL: API_URL,
-  timeout: 15000, // 15s request timeout: prevents pages from "loading forever" when the backend is down/slow
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json'
   }
@@ -19,8 +41,8 @@ const api = axios.create({
 // Request Interceptor: Attach access token to outgoing requests
 api.interceptors.request.use(
   (config) => {
-    const token = useAuthStore.getState().accessToken;
-    if (token) {
+    const token = getStoredAccessToken();
+    if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;

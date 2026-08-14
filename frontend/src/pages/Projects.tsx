@@ -371,7 +371,8 @@ export default function Projects() {
         if (docName) formData.append('description', docName);
 
         await api.post('/upload', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
+          headers: { 'Content-Type': 'multipart/form-data' },
+          timeout: 120000,
         });
       } else if (docUploadMode === 'url' && docName && docUrl) {
         // URL / cloud link registration

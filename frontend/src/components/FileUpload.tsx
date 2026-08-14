@@ -82,9 +82,11 @@ export default function FileUpload({ projectId, uploadedById, category = 'other'
 
       const res = await api.post(endpoint, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000,
         onUploadProgress: (e) => {
-          const pct = Math.round(((e.loaded || 0) / (e.total || 1)) * 90) + 10;
-          setFiles(prev => prev.map((f, i) => i === idx ? { ...f, progress: pct } : f));
+          if (!e.total) return;
+          const pct = Math.round(((e.loaded || 0) / e.total) * 90) + 10;
+          setFiles(prev => prev.map((f, i) => i === idx ? { ...f, progress: Math.min(pct, 100) } : f));
         },
       });
 

@@ -128,16 +128,18 @@ export default function Drive() {
    */
   const downloadFile = async (file: DriveFile) => {
     const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '');
-    if (!apiBase && !(file.fileUrl && (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://')))) return;
+    if (!apiBase) return;
 
-    const url = file.fileUrl && (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://'))
-      ? file.fileUrl
-      : `${apiBase}/files/${file.id}/download`;
+    const url = `${apiBase}/files/${file.id}/download`;
 
     try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const blob = await response.blob();
+      const response = await api.get(url, {
+        responseType: 'blob',
+        timeout: 120000,
+      });
+
+      const contentType = String(response.headers['content-type'] ?? 'application/octet-stream');
+      const blob = new Blob([response.data as BlobPart], { type: contentType });
       const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = objectUrl;
@@ -147,7 +149,7 @@ export default function Drive() {
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
     } catch (err) {
-      console.warn('Download via fetch failed, falling back to window.open:', err);
+      console.warn('Authenticated download failed, falling back to window.open:', err);
       window.open(url, '_blank');
     }
   };
