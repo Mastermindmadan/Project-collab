@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { HardDrive, FolderOpen, FolderPlus, Upload, Download, Trash2, Search, File, FileText, Image, Archive, ChevronRight, Loader2 } from 'lucide-react';
+import { HardDrive, FolderOpen, FolderPlus, Upload, Download, Trash2, Search, File, FileText, Image, Archive, ChevronRight, Loader2, X } from 'lucide-react';
 import api from '../utils/api';
 import { useAuthStore } from '../store/auth.store';
+import { toast } from 'sonner';
 import FileUpload from '../components/FileUpload';
 import dayjs from 'dayjs';
 
@@ -25,6 +26,12 @@ function formatSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const isIOS = (): boolean => {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+};
+
 export default function Drive() {
   const { user } = useAuthStore();
   const [projects, setProjects] = useState<any[]>([]);
@@ -40,7 +47,6 @@ export default function Drive() {
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolder, setShowNewFolder] = useState(false);
 
-  // Load projects
   useEffect(() => {
     api.get('/teams/my-teams').then(res => {
       const projs: any[] = [];
@@ -92,65 +98,94 @@ export default function Drive() {
     loadDrive(selectedProject, currentFolderId);
   };
 
-  /**
-   * Preview:
-   * - PDFs → Google Docs Viewer (reliable PDF rendering, avoids Edge/Cloudinary quirks)
-   * - Other files → open Cloudinary URL directly (images, videos work natively)
-   * Google Docs Viewer fetches the PDF from Cloudinary's image/upload URL (publicly accessible).
-   */
-  const previewFile = (file: DriveFile) => {
-    const url = file.fileUrl;
-    if (!url) return;
+  const [previewFile, setPreviewFile] = useState<DriveFile | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewType, setPreviewType] = useState<'pdf' | 'image' | 'text' | 'video' | 'unsupported'>('unsupported');
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
+  const [previewIframeError, setPreviewIframeError] = useState(false);
 
-    const isPdf =
-      file.mimeType === 'application/pdf' ||
-      file.fileType === 'pdf' ||
-      url.toLowerCase().endsWith('.pdf');
+  const getPreviewType = (file: DriveFile): 'pdf' | 'image' | 'text' | 'video' | 'unsupported' => {
+    const ft = (file.fileType || '').toLowerCase();
+    const mt = (file.mimeType || '').toLowerCase();
+    const ext = file.fileUrl ? file.fileUrl.split('.').pop()?.toLowerCase() || '' : '';
 
-    if (isPdf && (url.startsWith('http://') || url.startsWith('https://'))) {
-      // Google Docs Viewer renders the PDF — bypasses Edge PDF viewer and Cloudinary content-type quirks
-      const viewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
-      window.open(viewerUrl, '_blank');
-    } else if (url.startsWith('http://') || url.startsWith('https://')) {
-      window.open(url, '_blank');
-    } else {
-      // Local/legacy file
-      const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '');
-      if (!apiBase) return;
-      window.open(`${apiBase}/files/${file.id}/preview`, '_blank');
+    if (ft === 'pdf' || mt === 'application/pdf' || ext === 'pdf') return 'pdf';
+    if (ft === 'image' || mt.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return 'image';
+    if (ft === 'text' || ft === 'txt' || mt === 'text/plain' || ext === 'txt') return 'text';
+    if (ft === 'video' || mt.startsWith('video/') || ['mp4', 'webm', 'mov'].includes(ext)) return 'video';
+    return 'unsupported';
+  };
+
+  const openPreview = async (file: DriveFile) => {
+    const type = getPreviewType(file);
+    setPreviewFile(file);
+    setPreviewType(type);
+    setPreviewLoading(true);
+    setPreviewError('');
+    setPreviewUrl(null);
+    setPreviewIframeError(false);
+
+    try {
+      const res = await api.get(`/files/${file.id}/preview`, {
+        responseType: type === 'text' ? 'text' : 'blob',
+      });
+
+      if (type === 'text') {
+        setPreviewUrl(typeof res.data === 'string' ? res.data : String(res.data || ''));
+      } else {
+        const blob = new Blob([res.data as BlobPart]);
+        setPreviewUrl(URL.createObjectURL(blob));
+      }
+    } catch (err: any) {
+      console.error('Preview failed:', err);
+      setPreviewError(err.response?.data?.message || 'Unable to load preview. Please use download instead.');
+    } finally {
+      setPreviewLoading(false);
     }
   };
 
-  /**
-   * Download: fetch + Blob → forces Save As dialog with the correct filename.
-   * Browser fetch() carries Origin/browser headers → Cloudinary image/upload allows it.
-   * Falls back to window.open if fetch fails (CORS or network error).
-   */
+  const closePreview = () => {
+    if (previewUrl && previewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(previewUrl);
+    }
+    setPreviewFile(null);
+    setPreviewUrl(null);
+    setPreviewError('');
+    setPreviewIframeError(false);
+  };
+
+  const triggerDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const iOS = isIOS();
+
+    if (iOS) {
+      window.open(url, '_blank');
+    } else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  };
+
   const downloadFile = async (file: DriveFile) => {
-    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '');
-    if (!apiBase) return;
-
-    const url = `${apiBase}/files/${file.id}/download`;
-
     try {
-      const response = await api.get(url, {
+      const response = await api.get(`/files/${file.id}/download`, {
         responseType: 'blob',
         timeout: 120000,
       });
 
       const contentType = String(response.headers['content-type'] ?? 'application/octet-stream');
       const blob = new Blob([response.data as BlobPart], { type: contentType });
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = file.name;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
-    } catch (err) {
-      console.warn('Authenticated download failed, falling back to window.open:', err);
-      window.open(url, '_blank');
+      triggerDownload(blob, file.name);
+    } catch (err: any) {
+      console.error('Download failed:', err);
+      toast.error(err.response?.data?.message || 'Download failed. Please try again.');
     }
   };
 
@@ -158,7 +193,6 @@ export default function Drive() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <p className="text-muted-foreground text-sm flex items-center gap-1.5"><HardDrive className="w-4 h-4 text-primary" /> Project Drive</p>
@@ -178,7 +212,6 @@ export default function Drive() {
         </div>
       </div>
 
-      {/* Search */}
       <div className="flex items-center gap-2">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -192,7 +225,6 @@ export default function Drive() {
         )}
       </div>
 
-      {/* Upload Panel */}
       {showUpload && user && selectedProject && (
         <div className="glass-panel rounded-2xl p-5">
           <h3 className="text-sm font-bold text-foreground mb-3">Upload Files to {currentFolderId ? 'Folder' : 'Root'}</h3>
@@ -206,7 +238,6 @@ export default function Drive() {
         </div>
       )}
 
-      {/* New Folder Input */}
       {showNewFolder && (
         <div className="glass-panel rounded-2xl p-4 flex items-center gap-3">
           <FolderOpen className="w-5 h-5 text-amber-500" />
@@ -218,7 +249,6 @@ export default function Drive() {
         </div>
       )}
 
-      {/* Breadcrumb */}
       <div className="flex items-center gap-1 text-sm">
         <button onClick={() => loadDrive(selectedProject, null)} className="text-primary hover:underline font-semibold flex items-center gap-1">
           <HardDrive className="w-3.5 h-3.5" /> Root
@@ -231,14 +261,12 @@ export default function Drive() {
         ))}
       </div>
 
-      {/* Content */}
       {loading ? (
         <div className="glass-panel rounded-2xl p-12 flex items-center justify-center">
           <Loader2 className="w-8 h-8 text-primary animate-spin" />
         </div>
       ) : (
         <div className="glass-panel rounded-3xl p-5">
-          {/* Folders */}
           {!searchResults && folders.length > 0 && (
             <div className="mb-5">
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-3">Folders</p>
@@ -259,7 +287,6 @@ export default function Drive() {
             </div>
           )}
 
-          {/* Files */}
           {displayFiles.length > 0 ? (
             <div>
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-3">
@@ -268,9 +295,9 @@ export default function Drive() {
               <div className="space-y-2">
                 {displayFiles.map(f => (
                   <div key={f.id} className="flex items-center gap-4 p-3 glass-card rounded-xl hover:border-primary/30 transition-all group">
-                    <div className="flex-shrink-0 cursor-pointer" onClick={() => previewFile(f)}>{fileIcon(f.fileType)}</div>
+                    <div className="flex-shrink-0 cursor-pointer" onClick={() => openPreview(f)}>{fileIcon(f.fileType)}</div>
                     <div className="flex-1 min-w-0">
-                      <button onClick={() => previewFile(f)} className="text-sm font-bold text-foreground truncate hover:text-primary transition-colors text-left block w-full">
+                      <button onClick={() => openPreview(f)} className="text-sm font-bold text-foreground truncate hover:text-primary transition-colors text-left block w-full">
                         {f.name}
                       </button>
                       <p className="text-xs text-muted-foreground">
@@ -279,7 +306,7 @@ export default function Drive() {
                       </p>
                     </div>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => previewFile(f)} title="Preview File" className="px-2 py-1 text-xs bg-secondary hover:bg-primary/20 hover:text-primary rounded-lg transition-colors font-medium">
+                      <button onClick={() => openPreview(f)} title="Preview File" className="px-2 py-1 text-xs bg-secondary hover:bg-primary/20 hover:text-primary rounded-lg transition-colors font-medium">
                         Preview
                       </button>
                       <button onClick={() => downloadFile(f)} title="Download" className="p-1.5 hover:bg-secondary rounded-lg transition-colors">
@@ -300,7 +327,88 @@ export default function Drive() {
               <p className="text-base font-bold text-foreground">This drive is empty</p>
               <p className="text-sm text-muted-foreground">Upload files or create a folder to get started</p>
             </div>
-          ) : null}
+            ) : null}
+        </div>
+      )}
+
+      {previewFile && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-sm p-3 sm:p-4">
+          <div className="bg-background border border-border rounded-2xl w-full max-w-full sm:max-w-5xl h-[92vh] sm:h-auto sm:max-h-[85vh] flex flex-col shadow-2xl">
+            <div className="flex items-center justify-between p-3 sm:p-4 border-b border-border flex-shrink-0">
+              <h3 className="text-sm font-bold text-foreground truncate pr-2">{previewFile.name}</h3>
+              <button onClick={closePreview} className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors flex-shrink-0" aria-label="Close preview">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-3 sm:p-4">
+              {previewLoading ? (
+                <div className="flex items-center justify-center h-64">
+                  <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                </div>
+              ) : previewError ? (
+                <div className="text-center py-12">
+                  <File className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground mb-4">{previewError}</p>
+                  <button onClick={() => downloadFile(previewFile)} className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl font-bold text-sm mx-auto">
+                    <Download className="w-4 h-4" /> Download {previewFile.name}
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {previewType === 'pdf' ? (
+                    <div className="text-center py-6 sm:py-8">
+                      <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+                      {isIOS() ? (
+                        <>
+                          <p className="text-sm text-muted-foreground mb-4">PDF preview is not supported on this device. Please download the file to view it.</p>
+                          <button onClick={() => downloadFile(previewFile)} className="flex items-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground rounded-xl font-bold text-sm mx-auto min-h-[44px]">
+                            <Download className="w-4 h-4" /> Download PDF
+                          </button>
+                        </>
+                      ) : previewUrl && !previewIframeError ? (
+                        <>
+                          <iframe
+                            src={previewUrl}
+                            className="w-full h-[55vh] sm:h-[60vh] rounded-xl border border-border mb-4"
+                            title={previewFile.name}
+                            onError={() => setPreviewIframeError(true)}
+                          />
+                          <button onClick={() => downloadFile(previewFile)} className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl font-bold text-sm mx-auto min-h-[44px]">
+                            <Download className="w-4 h-4" /> Download {previewFile.name}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm text-muted-foreground mb-4">PDF preview failed to load. <button onClick={() => downloadFile(previewFile)} className="text-primary underline font-medium">Download PDF instead</button></p>
+                          <button onClick={() => downloadFile(previewFile)} className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl font-bold text-sm mx-auto min-h-[44px]">
+                            <Download className="w-4 h-4" /> Download {previewFile.name}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ) : previewType === 'image' ? (
+                    <img
+                      src={previewUrl || ''}
+                      alt={previewFile.name}
+                      className="max-w-full max-h-[70vh] mx-auto rounded-xl"
+                    />
+                  ) : previewType === 'text' ? (
+                    <pre className="whitespace-pre-wrap text-xs text-foreground bg-slate-950/50 rounded-xl p-4 max-h-[70vh] overflow-auto leading-relaxed">{previewUrl}</pre>
+                  ) : previewType === 'video' ? (
+                    <video src={previewUrl || ''} controls className="w-full max-h-[70vh] rounded-xl" />
+                  ) : (
+                    <div className="text-center py-12">
+                      <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+                      <p className="text-sm text-muted-foreground mb-4">Preview not available for this file type.</p>
+                      <button onClick={() => downloadFile(previewFile)} className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl font-bold text-sm mx-auto">
+                        <Download className="w-4 h-4" /> Download {previewFile.name}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
