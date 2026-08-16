@@ -15,7 +15,7 @@ import React, {
   useState, useEffect, useRef, useCallback, useMemo,
 } from 'react';
 import {
-  Send, Hash, Search, Smile, Paperclip, Phone, Video,
+  Send, Hash, Search, Smile, Phone, Video,
   AlertCircle, Shield, Trash2, Copy, Edit3, Check, X, Users,
   MessageSquareOff,
 } from 'lucide-react';
@@ -53,6 +53,8 @@ interface TeamChannel {
   memberCount: number;
   lastMsg: string;
   unread: number;
+  role?: string;           // current user's role in this team (OWNER/ADMIN/MEMBER)
+  members?: Array<{ id: string; name: string; email?: string; avatarUrl?: string; teamRole?: string }>;
 }
 
 interface OnlineMember {
@@ -118,6 +120,8 @@ export default function Chat() {
   const [contextMenu, setContextMenu]           = useState<{ msgId: string; x: number; y: number } | null>(null);
   const [reactionPicker, setReactionPicker]     = useState<string | null>(null);
   const [searchQuery, setSearchQuery]           = useState('');
+  const [newTeamName, setNewTeamName]         = useState('');
+  const [addEmail, setAddEmail]               = useState('');
 
   const bottomRef    = useRef<HTMLDivElement>(null);
   const socketRef    = useRef<Socket | null>(null);
@@ -180,6 +184,8 @@ export default function Chat() {
             ? `${ch.lastMessage.senderName}: ${ch.lastMessage.content}`
             : 'No messages yet',
           unread: 0,
+          role: ch.role,
+          members: Array.isArray(ch.members) ? ch.members : [],
         }));
         setChannels(mapped);
         if (mapped.length > 0) setActiveTeamId(mapped[0].id);
@@ -484,6 +490,71 @@ export default function Chat() {
 
   const activeChannel = channels.find(c => c.id === activeTeamId);
 
+  // ─── Team / Chat management handlers ────────────────────────────────────────
+  const canManage = ['OWNER', 'ADMIN'].includes(activeChannel?.role ?? '');
+
+  const updateTeamName = async (teamId?: string, newName?: string) => {
+    if (!teamId || !newName || !newName.trim()) return;
+    try {
+      await api.post('/teams/name', { teamId, newName: newName.trim() });
+      setChannels(prev => prev.map(ch =>
+        ch.id === teamId
+          ? { ...ch, rawName: newName.trim(), displayName: newName.trim().toLowerCase().replace(/\s+/g, '-') }
+          : ch
+      ));
+      setNewTeamName('');
+      setError(null);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to rename team.');
+    }
+  };
+
+  const handleAddMember = async (teamId: string, email: string) => {
+    if (!teamId || !email || !email.trim()) return;
+    setError(null);
+    try {
+      await api.post('/teams/add-member', { teamId, email: email.trim() });
+      // Refresh channels to reflect the new member list/count
+      const res = await api.get('/chat/channels');
+      const raw: any[] = res.data.channels ?? [];
+      setChannels(prev => {
+        const fresh = raw.find(c => c.id === teamId);
+        if (!fresh) return prev;
+        return prev.map(ch =>
+          ch.id === teamId
+            ? {
+                ...ch,
+                memberCount: fresh.memberCount ?? ch.memberCount,
+                members: Array.isArray(fresh.members) ? fresh.members : ch.members,
+              }
+            : ch
+        );
+      });
+      setAddEmail('');
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to add member.');
+    }
+  };
+
+  const handleRemoveMember = async (teamId: string, targetUserId: string) => {
+    if (!teamId || !targetUserId) return;
+    setError(null);
+    try {
+      await api.post('/teams/remove', { teamId, targetUserId });
+      setChannels(prev => prev.map(ch =>
+        ch.id === teamId
+          ? {
+              ...ch,
+              memberCount: Math.max(0, (ch.memberCount ?? 1) - 1),
+              members: (ch.members ?? []).filter(m => m.id !== targetUserId),
+            }
+          : ch
+      ));
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to remove member.');
+    }
+  };
+
   // ─────────────────────────────────────────────
   // RENDER — Empty state (no teams)
   // ─────────────────────────────────────────────
@@ -620,6 +691,24 @@ export default function Chat() {
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" />
                 {activeChannel?.memberCount ?? '…'} members · Real-time
               </p>
+{canManage && (
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newTeamName}
+                    onChange={(e) => setNewTeamName(e.target.value)}
+                    placeholder="Rename team"
+                    className="w-32 bg-slate-950/50 border border-slate-800 rounded-xl px-2 py-1 text-xs text-foreground focus:outline-none focus:border-primary"
+                  />
+                  <button
+                    onClick={() => updateTeamName(activeChannel?.id, newTeamName)}
+                    disabled={!newTeamName.trim()}
+                    className="px-3 py-1.5 bg-primary text-primary-foreground text-xs font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Save
+                  </button>
+                </div>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -841,9 +930,6 @@ export default function Chat() {
             <button onClick={() => setShowEmojiPicker(v => !v)} className="p-2 rounded-xl text-muted-foreground hover:text-foreground transition-colors flex-shrink-0" title="Emoji">
               <Smile className="w-4 h-4" />
             </button>
-            <button className="p-2 rounded-xl text-muted-foreground hover:text-foreground transition-colors flex-shrink-0" title="Attach File">
-              <Paperclip className="w-4 h-4" />
-            </button>
             <textarea
               value={input}
               onChange={handleInputChange}
@@ -883,36 +969,62 @@ export default function Chat() {
             </button>
           </div>
           <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider mb-2">
-            Online · {onlineMembers.length > 0 ? onlineMembers.length : 1}
+            {onlineMembers.length > 0 ? onlineMembers.length : 1} online · {activeChannel?.memberCount ?? 1} total
           </p>
-          {/* Current user */}
-          <div className="flex items-center gap-2 mb-1.5">
-            <div className="relative">
-              <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold text-white" style={{ background: avatarBg(user?.name ?? '') }}>
-                {user?.name?.[0]?.toUpperCase()}
-              </div>
-              <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-background" />
-            </div>
-            <div>
-              <span className="text-xs font-semibold text-foreground truncate block">{user?.name}</span>
-              <span className="text-[10px] text-muted-foreground">you</span>
-            </div>
-          </div>
-          {onlineMembers.filter(m => m.userId !== user?.id).map(m => (
-            <div key={m.socketId} className="flex items-center gap-2 mb-1.5">
-              <div className="relative">
-                <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold text-white" style={{ background: avatarBg(m.name) }}>
-                  {m.name[0]}
+
+          {/* All members */}
+          <div className="flex-1 overflow-y-auto space-y-1.5 min-h-0">
+            {(activeChannel?.members ?? []).map(m => {
+              const online = onlineMembers.some(om => om.userId === m.id);
+              const isSelf = m.id === user?.id;
+              const roleLabel = (m.teamRole || 'MEMBER').toLowerCase();
+              return (
+                <div key={m.id} className="flex items-center gap-2">
+                  <div className="relative">
+                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0" style={{ background: avatarBg(m.name) }}>
+                      {m.name?.[0]?.toUpperCase()}
+                    </div>
+                    <span className={`absolute bottom-0 right-0 w-2 h-2 rounded-full ring-1 ring-background ${online ? 'bg-emerald-500' : 'bg-slate-600'}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-foreground truncate">{m.name}{isSelf ? ' (you)' : ''}</p>
+                    <p className="text-[9px] text-muted-foreground truncate">{roleLabel}</p>
+                  </div>
+                  {canManage && !isSelf && m.teamRole !== 'OWNER' && (
+                    <button onClick={() => { if (window.confirm(`Remove ${m.name} from this team?`)) handleRemoveMember(activeChannel!.id, m.id); }} className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10" title="Remove member">
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
-                <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-background" />
+              );
+            })}
+            {(activeChannel?.members ?? []).length === 0 && (
+              <p className="text-[10px] text-muted-foreground">No members listed.</p>
+            )}
+          </div>
+
+          {/* Add member (Owner/Admin only) */}
+          {canManage && (
+            <div className="mt-3 border-t border-slate-800 pt-3">
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Add Member</p>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="email"
+                  value={addEmail}
+                  onChange={(e) => setAddEmail(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && activeChannel) { e.preventDefault(); handleAddMember(activeChannel.id, addEmail); } }}
+                  placeholder="user@university.edu"
+                  className="flex-1 min-w-0 bg-slate-950/50 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary"
+                />
+                <button
+                  onClick={() => activeChannel && handleAddMember(activeChannel.id, addEmail)}
+                  disabled={!addEmail.trim()}
+                  className="px-2.5 py-1.5 bg-primary text-primary-foreground text-[10px] font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Add
+                </button>
               </div>
-              <span className="text-xs font-semibold text-foreground truncate">{m.name}</span>
             </div>
-          ))}
-          {(activeChannel?.memberCount ?? 0) > onlineMembers.length + 1 && (
-            <p className="text-[10px] text-muted-foreground mt-2">
-              +{(activeChannel?.memberCount ?? 0) - onlineMembers.length - 1} offline
-            </p>
           )}
         </div>
       )}

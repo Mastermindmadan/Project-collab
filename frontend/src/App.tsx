@@ -18,6 +18,7 @@ const PageLoader = () => (
 const Login = lazy(() => import('./pages/Login'));
 const Register = lazy(() => import('./pages/Register'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const OtpVerification = lazy(() => import('./pages/OtpVerification'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const Profile = lazy(() => import('./pages/Profile'));
 
@@ -66,6 +67,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/otp-verification" element={<OtpVerification />} />
           <Route path="/reset-password" element={<ResetPassword />} />
 
           {/* Protected workspace routes */}

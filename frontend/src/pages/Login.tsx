@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/auth.store';
 import api from '../utils/api';
+import { toast } from 'sonner';
 import {
   Mail, Lock, Loader2, ArrowRight, Zap, GitBranch, CheckSquare,
   Users, Sparkles, ShieldCheck, Activity, Code2
@@ -31,6 +32,10 @@ export default function Login() {
       const response = await api.post('/auth/login', { email, password });
       const { user, accessToken, refreshToken } = response.data;
       addAccount(user, accessToken, refreshToken);
+      toast.success(`Welcome back, ${user.name}! Login successful.`, {
+        description: 'Redirecting to dashboard...',
+        style: { fontSize: '0.85rem', fontFamily: 'Inter, sans-serif' }
+      });
       navigate('/');
     } catch (err: any) {
       console.error(err);

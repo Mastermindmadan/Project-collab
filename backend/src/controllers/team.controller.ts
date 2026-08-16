@@ -342,3 +342,80 @@ export const generateQRCodeInvite = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 };
+
+export const updateTeamName = async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+    const { teamId, newName } = req.body;
+    if (!teamId || !newName) return res.status(400).json({ error: 'teamId and newName are required.' });
+
+    // Check membership
+    const membership = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId } }
+    });
+    if (!membership) return res.status(403).json({ error: 'Access denied.' });
+
+    // Check permission - only owner or admin can change name
+    const actor = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId } }
+    });
+    if (!actor || (actor.role !== 'OWNER' && actor.role !== 'ADMIN')) return res.status(403).json({ error: 'Permission denied. Must be Owner or Admin.' });
+
+    // Update team name
+    const updated = await prisma.team.update({
+      where: { id: teamId },
+      data: { name: newName }
+    });
+    res.json({ message: 'Team name updated successfully', team: { id: updated.id, name: updated.name } });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+export const addMember = async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { teamId, email, userId } = req.body;
+    if (!teamId || (!email && !userId)) {
+      return res.status(400).json({ error: 'teamId and (email or userId) are required.' });
+    }
+
+    // Check actor membership + elevated permission (OWNER or ADMIN)
+    const actor = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId } }
+    });
+    if (!actor || (actor.role !== 'OWNER' && actor.role !== 'ADMIN')) {
+      return res.status(403).json({ error: 'Permission denied. Must be Owner or Admin to add members.' });
+    }
+
+    // Resolve the target user by id (preferred) or email
+    const targetUser = userId
+      ? await prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, email: true, avatarUrl: true } })
+      : await prisma.user.findUnique({ where: { email }, select: { id: true, name: true, email: true, avatarUrl: true } });
+
+    if (!targetUser) {
+      return res.status(404).json({ error: 'User not found. Check the email address.' });
+    }
+
+    // Prevent duplicate membership
+    const existing = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: targetUser.id, teamId } }
+    });
+    if (existing) {
+      return res.status(400).json({ error: 'User is already a member of this team.' });
+    }
+
+    const member = await prisma.teamMember.create({
+      data: { userId: targetUser.id, teamId, role: 'MEMBER' },
+      include: { user: { select: { id: true, name: true, email: true, avatarUrl: true, role: true } } }
+    });
+
+    res.status(201).json({ message: 'Member added successfully', member });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+};

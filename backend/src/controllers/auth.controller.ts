@@ -3,6 +3,8 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import prisma from '../utils/prisma';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
+import crypto from 'crypto';
+import { sendMail } from '../utils/mailer';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
@@ -12,6 +14,8 @@ if (!JWT_SECRET || !JWT_REFRESH_SECRET) {
 }
 
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const PASSWORD_RESET_OTP_EXPIRY_MINUTES = Number(process.env.PASSWORD_RESET_OTP_EXPIRY_MINUTES || 10);
+const PASSWORD_RESET_OTP_RESEND_COOLDOWN_SECONDS = Number(process.env.PASSWORD_RESET_OTP_RESEND_COOLDOWN_SECONDS || 60);
 
 // Helper to generate access and refresh tokens
 const generateTokens = (user: { id: string; email: string; name: string; role: 'STUDENT' | 'INSTRUCTOR' }) => {
@@ -71,6 +75,87 @@ const findMatchingRefreshTokenRecord = async (userId: string, plainRefreshToken:
   }
 
   return null;
+};
+
+const generateSixDigitOtp = (): string => {
+  return crypto.randomInt(100000, 1000000).toString();
+};
+
+const sendPasswordResetOtp = async (email: string, name: string, otp: string) => {
+  const html = `<html><body style="font-family:Arial,Helvetica,sans-serif;">
+    <h2>ProjectCollab AI Password Reset Code</h2>
+    <p>Hi ${name || 'there'},</p>
+    <p>Use the following one-time code to reset your password:</p>
+    <p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:18px 0;">${otp}</p>
+    <p>This code expires in ${PASSWORD_RESET_OTP_EXPIRY_MINUTES} minutes and can be used only once.</p>
+    <p>If you did not request this, you can safely ignore this email.</p>
+    <hr/>
+    <p style="font-size:0.9em;color:#555;">- The ProjectCollab AI Team</p>
+  </body></html>`;
+
+  await sendMail(email, 'Your ProjectCollab AI Password Reset OTP', html);
+};
+
+const getValidPasswordResetTokens = async (userId: string) => {
+  return prisma.token.findMany({
+    where: {
+      userId,
+      type: 'PASSWORD_RESET',
+      expiresAt: { gte: new Date() },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 5,
+  });
+};
+
+const findMatchingOtpToken = async (userId: string, otp: string) => {
+  const candidates = await getValidPasswordResetTokens(userId);
+  for (const candidate of candidates) {
+    const isMatch = await bcrypt.compare(otp, candidate.token);
+    if (isMatch) return candidate;
+  }
+  return null;
+};
+
+const enforceOtpResendCooldown = async (userId: string) => {
+  const latest = await prisma.token.findFirst({
+    where: { userId, type: 'PASSWORD_RESET' },
+    orderBy: { createdAt: 'desc' },
+    select: { createdAt: true },
+  });
+
+  if (!latest) return;
+
+  const elapsedMs = Date.now() - latest.createdAt.getTime();
+  const minIntervalMs = PASSWORD_RESET_OTP_RESEND_COOLDOWN_SECONDS * 1000;
+  if (elapsedMs < minIntervalMs) {
+    const retryAfterSeconds = Math.ceil((minIntervalMs - elapsedMs) / 1000);
+    const error = new Error('OTP_RESEND_COOLDOWN');
+    (error as any).retryAfterSeconds = retryAfterSeconds;
+    throw error;
+  }
+};
+
+const issuePasswordResetOtp = async (user: { id: string; email: string; name: string }) => {
+  await enforceOtpResendCooldown(user.id);
+
+  const otp = generateSixDigitOtp();
+  const hashedOtp = await bcrypt.hash(otp, 10);
+  const expiresAt = new Date(Date.now() + PASSWORD_RESET_OTP_EXPIRY_MINUTES * 60 * 1000);
+
+  // Keep a single active OTP per user.
+  await prisma.token.deleteMany({ where: { userId: user.id, type: 'PASSWORD_RESET' } });
+
+  await prisma.token.create({
+    data: {
+      token: hashedOtp,
+      userId: user.id,
+      type: 'PASSWORD_RESET',
+      expiresAt,
+    },
+  });
+
+  await sendPasswordResetOtp(user.email, user.name, otp);
 };
 
 export const register = async (req: Request, res: Response) => {
@@ -291,75 +376,102 @@ export const updateProfile = async (req: Request, res: Response) => {
   }
 };
 
-// Password Reset Flow
-import crypto from 'crypto';
-import { sendMail } from '../utils/mailer';
-
-// Request password reset – sends email with token link
+// Password Reset OTP Flow
 export const requestPasswordReset = async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
-    // Respond with generic message to avoid enumeration
-    const genericSuccess = { message: 'If the email exists, a reset link has been sent.' };
+    const genericSuccess = { message: 'If the account exists, an OTP has been sent.' };
     if (!email) return res.status(400).json({ error: 'Email is required.' });
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.json(genericSuccess);
 
-    // Generate token and hash it for storage
-    const rawToken = crypto.randomBytes(32).toString('hex');
-    const hashedToken = await bcrypt.hash(rawToken, 10);
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
-
-    await prisma.token.create({
-      data: {
-        token: hashedToken,
-        userId: user.id,
-        expiresAt,
-        type: 'PASSWORD_RESET',
-      },
-    });
-
-    const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${rawToken}&id=${user.id}`;
-    const html = `<html><body style="font-family:Arial,Helvetica,sans-serif;">
-      <h2>Reset Your ProjectCollab AI Password</h2>
-      <p>Hi ${user.name || ''},</p>
-      <p>We received a request to reset your password. Click the button below to set a new password. This link will expire in 15 minutes.</p>
-      <a href="${resetLink}" style="display:inline-block;padding:12px 24px;background:#4F46E5;color:#fff;border-radius:4px;text-decoration:none;">Reset Password</a>
-      <p>If you did not request a password reset, you can safely ignore this email.</p>
-      <hr/>
-      <p style="font-size:0.9em;color:#555;">— The ProjectCollab AI Team</p>
-    </body></html>`;
-
-    await sendMail(email, 'Reset Your ProjectCollab AI Password', html);
+    await issuePasswordResetOtp({ id: user.id, email: user.email, name: user.name });
     return res.json(genericSuccess);
+  } catch (error) {
+    if ((error as Error).message === 'OTP_RESEND_COOLDOWN') {
+      const retryAfter = (error as any).retryAfterSeconds || PASSWORD_RESET_OTP_RESEND_COOLDOWN_SECONDS;
+      return res.status(429).json({ error: `Please wait ${retryAfter}s before requesting another OTP.` });
+    }
+    console.error(error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
+export const resendPasswordResetOtp = async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    const genericSuccess = { message: 'If the account exists, a new OTP has been sent.' };
+    if (!email) return res.status(400).json({ error: 'Email is required.' });
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.json(genericSuccess);
+
+    await issuePasswordResetOtp({ id: user.id, email: user.email, name: user.name });
+    return res.json(genericSuccess);
+  } catch (error) {
+    if ((error as Error).message === 'OTP_RESEND_COOLDOWN') {
+      const retryAfter = (error as any).retryAfterSeconds || PASSWORD_RESET_OTP_RESEND_COOLDOWN_SECONDS;
+      return res.status(429).json({ error: `Please wait ${retryAfter}s before requesting another OTP.` });
+    }
+    console.error(error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
+export const verifyPasswordResetOtp = async (req: Request, res: Response) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || !otp) return res.status(400).json({ error: 'Email and OTP are required.' });
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(400).json({ error: 'Invalid or expired OTP.' });
+    }
+
+    const matchedToken = await findMatchingOtpToken(user.id, String(otp));
+    if (!matchedToken) {
+      return res.status(400).json({ error: 'Invalid or expired OTP.' });
+    }
+
+    return res.json({ message: 'OTP verified successfully.' });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 };
 
-// Reset password using token
 export const resetPassword = async (req: Request, res: Response) => {
   try {
-    const { token, id, newPassword } = req.body;
-    if (!token || !id || !newPassword) return res.status(400).json({ error: 'Missing fields.' });
-
-    const dbToken = await prisma.token.findFirst({
-      where: { userId: id, type: 'PASSWORD_RESET' },
-    });
-    if (!dbToken) return res.status(400).json({ error: 'Invalid or expired token.' });
-    if (dbToken.expiresAt < new Date()) {
-      await prisma.token.delete({ where: { id: dbToken.id } });
-      return res.status(400).json({ error: 'Token has expired.' });
+    const { email, otp, newPassword, confirmPassword } = req.body;
+    if (!email || !otp || !newPassword || !confirmPassword) {
+      return res.status(400).json({ error: 'Missing required fields.' });
     }
-    const isValid = await bcrypt.compare(token, dbToken.token);
-    if (!isValid) return res.status(400).json({ error: 'Invalid token.' });
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ error: 'Passwords do not match.' });
+    }
+
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(400).json({ error: 'Invalid or expired OTP.' });
+    }
+
+    const matchedToken = await findMatchingOtpToken(user.id, String(otp));
+    if (!matchedToken) {
+      return res.status(400).json({ error: 'Invalid or expired OTP.' });
+    }
 
     const passwordHash = await bcrypt.hash(newPassword, 10);
-    await prisma.user.update({ where: { id }, data: { passwordHash } });
-    // Remove used token
-    await prisma.token.delete({ where: { id: dbToken.id } });
+    await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+
+    // Single-use OTP: invalidate all reset tokens once password is changed.
+    await prisma.token.deleteMany({ where: { userId: user.id, type: 'PASSWORD_RESET' } });
+
     return res.json({ message: 'Password has been reset successfully.' });
   } catch (error) {
     console.error(error);

@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { register, login, logout, refreshToken, getProfile, updateProfile, requestPasswordReset, resetPassword } from '../controllers/auth.controller';
+import { register, login, logout, refreshToken, getProfile, updateProfile, requestPasswordReset, resendPasswordResetOtp, verifyPasswordResetOtp, resetPassword } from '../controllers/auth.controller';
 import { authenticateJWT } from '../middlewares/auth.middleware';
-import { authRateLimiter } from '../middlewares/rateLimit.middleware';
+import { authRateLimiter, otpRequestRateLimiter } from '../middlewares/rateLimit.middleware';
 
 const router = Router();
 
@@ -14,7 +14,10 @@ router.post('/refresh-token', refreshToken);
 router.get('/profile', authenticateJWT, getProfile);
 router.put('/profile', authenticateJWT, updateProfile);
 
-router.post('/request-password-reset', authRateLimiter, requestPasswordReset);
+// Password Reset OTP Flow (with abuse/brute-force protection)
+router.post('/request-password-reset', otpRequestRateLimiter, requestPasswordReset);
+router.post('/resend-password-reset-otp', otpRequestRateLimiter, resendPasswordResetOtp);
+router.post('/verify-password-reset-otp', otpRequestRateLimiter, verifyPasswordResetOtp);
 router.post('/reset-password', authRateLimiter, resetPassword);
 
 export default router;

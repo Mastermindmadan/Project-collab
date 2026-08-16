@@ -15,6 +15,19 @@ export const authRateLimiter = rateLimit({
   },
 });
 
+/** Dedicated limiter for OTP send/resend to reduce abuse. */
+export const otpRequestRateLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res.status(429).json({
+      error: 'Too many OTP requests. Please wait before trying again.',
+    });
+  },
+});
+
 /**
  * Per-user hourly cap on Gemini-backed endpoints.
  * Keys by authenticated user ID when available; falls back to the

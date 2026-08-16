@@ -66,7 +66,7 @@ export default function Register() {
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/20 rounded-full blur-3xl -z-10 animate-pulse" style={{ animationDuration: '6s' }}></div>
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl -z-10 animate-pulse" style={{ animationDuration: '8s' }}></div>
 
-      <div className="w-full max-w-lg">
+      <form autoComplete="off" className="w-full max-w-lg">
         {/* Brand Header */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center p-3 rounded-2xl bg-primary/10 border border-primary/20 glow-primary mb-3">
@@ -103,7 +103,8 @@ export default function Register() {
                   <input
                     id="name"
                     type="text"
-                    placeholder="Madan Kumar"
+                    placeholder="Full Name"
+                    autoComplete="off"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className="w-full pl-10 pr-4 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white placeholder:text-slate-600 transition-all"
@@ -139,7 +140,8 @@ export default function Register() {
                 <input
                   id="email"
                   type="email"
-                  placeholder="madan@university.edu"
+                  placeholder="Institutional Email"
+                  autoComplete="off"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white placeholder:text-slate-600 transition-all"
@@ -160,6 +162,7 @@ export default function Register() {
                   id="password"
                   type="password"
                   placeholder="••••••••••••"
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white placeholder:text-slate-600 transition-all"

@@ -41,7 +41,7 @@ export const getUserChannels = async (req: Request, res: Response) => {
         inviteCode: team.inviteCode,
         role: tm.role,
         memberCount: team.members.length,
-        members: team.members.map((m) => m.user),
+        members: team.members.map((m) => ({ ...m.user, teamRole: m.role })),
         lastMessage: lastMsg
           ? {
               content: lastMsg.content,

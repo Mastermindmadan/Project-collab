@@ -23,8 +23,33 @@ export default function Reports() {
   const [teams, setTeams] = useState<any[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [report, setReport] = useState<ReportData | null>(null);
-  const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+
+  // ─── Mobile-friendly download helper ──────────────────────────
+  // On iOS Safari the `download` anchor attribute is ignored, so we fall
+  // back to opening the blob URL in a new tab where the user can manually
+  // save the file.  On desktop & Android the standard click-to-download
+  // approach works reliably.
+  const triggerDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+    if (isIOS) {
+      window.open(url, '_blank');
+    } else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    // Clean up on a short delay for iOS too
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  };
 
   useEffect(() => {
     api.get('/teams/my-teams').then(res => {
@@ -55,16 +80,10 @@ export default function Reports() {
       else if (selectedType === 'team') res = await api.get(`/reports/team/${selectedId}`);
       else if (selectedType === 'tasks') res = await api.get(`/reports/tasks?projectId=${selectedId}`);
       else if (selectedType === 'members') res = await api.get(`/reports/members?teamId=${selectedId}`);
-      else if (selectedType === 'github') {
+            else if (selectedType === 'github') {
         const githubRes = await api.get(`/github/report/${selectedId}`, { responseType: 'blob' });
-        const url = window.URL.createObjectURL(new Blob([githubRes.data], { type: 'application/pdf' }));
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', `github-report-${selectedId}-${Date.now()}.pdf`);
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.URL.revokeObjectURL(url);
+        const blob = new Blob([githubRes.data], { type: 'application/pdf' });
+        triggerDownload(blob, `github-report-${selectedId}-${Date.now()}.pdf`);
         setLoading(false);
         return;
       }
@@ -115,8 +134,11 @@ export default function Reports() {
           head: [['Name', 'Team', 'Role', 'Total', 'Completed', 'Productivity']],
           body: (report.members || []).map((m: any) => [m.name, m.team, m.role, m.totalTasks, m.completed, `${m.productivity}%`]),
         });
-      }
-      doc.save(`projectcollab-${selectedType}-report-${Date.now()}.pdf`);
+            }
+
+      // Use blob-based download for mobile compatibility (iOS Safari ignores download attr)
+      const blob = doc.output('blob');
+      triggerDownload(blob, `projectcollab-${selectedType}-report-${Date.now()}.pdf`);
     } finally { setGenerating(false); }
   };
 
@@ -129,10 +151,11 @@ export default function Reports() {
       else if (selectedType === 'members') data = (report.members || []).map((m: any) => ({ Name: m.name, Team: m.team, Role: m.role, Total: m.totalTasks, Completed: m.completed, Productivity: `${m.productivity}%` }));
       else if (selectedType === 'project' && report.report) data = report.report.memberStats.map((m: any) => ({ Name: m.name, Role: m.role, Assigned: m.assigned, Completed: m.completed }));
       else if (selectedType === 'team' && report.report) data = report.report.projects.map((p: any) => ({ Title: p.title, Status: p.status, HealthScore: p.healthScore, TotalTasks: p.totalTasks, CompletedTasks: p.completedTasks }));
-      const ws = XLSX.utils.json_to_sheet(data);
+            const ws = XLSX.utils.json_to_sheet(data);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Report');
-      XLSX.writeFile(wb, `projectcollab-${selectedType}-report-${Date.now()}.xlsx`);
+      const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      triggerDownload(new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `projectcollab-${selectedType}-report-${Date.now()}.xlsx`);
     } finally { setGenerating(false); }
   };
 

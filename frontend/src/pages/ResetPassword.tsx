@@ -1,17 +1,14 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { Lock, CheckCircle2, Loader2, ArrowLeft } from 'lucide-react';
 import api from '../utils/api';
 
-function useQuery() {
-  return new URLSearchParams(useLocation().search);
-}
-
 export default function ResetPassword() {
   const navigate = useNavigate();
-  const query = useQuery();
-  const token = query.get('token') || '';
-  const id = query.get('id') || '';
+  const location = useLocation();
+  const state = (location.state as { email?: string; otp?: string } | null) ?? null;
+  const email = state?.email || '';
+  const otp = state?.otp || '';
 
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -19,8 +16,17 @@ export default function ResetPassword() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
+  // If the user landed here without an authenticated OTP session, restart the flow.
+  if (!email || !otp) {
+    return <Navigate to="/forgot-password" replace />;
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (newPassword.length < 8) {
+      setError('Password must be at least 8 characters long.');
+      return;
+    }
     if (newPassword !== confirmPassword) {
       setError('Passwords do not match.');
       return;
@@ -28,7 +34,7 @@ export default function ResetPassword() {
     setLoading(true);
     setError('');
     try {
-      await api.post('/auth/reset-password', { token, id, newPassword });
+      await api.post('/auth/reset-password', { email, otp, newPassword, confirmPassword });
       setSuccess(true);
       setTimeout(() => navigate('/login'), 3000);
     } catch (err: any) {

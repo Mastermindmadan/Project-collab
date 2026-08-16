@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { KeyRound, Mail, ArrowLeft, CheckCircle2, Loader2 } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { KeyRound, Mail, ArrowLeft, CheckCircle2, Loader2, ArrowRight } from 'lucide-react';
 import api from '../utils/api';
 
 export default function ForgotPassword() {
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -16,12 +17,18 @@ export default function ForgotPassword() {
     setError('');
     try {
       await api.post('/auth/request-password-reset', { email });
+      // Persist the email for this reset session only (sessionStorage, not the OTP)
+      try { sessionStorage.setItem('pcai-reset-email', email); } catch { /* ignore */ }
       setSent(true);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to send reset email. Please try again.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const goToOtp = () => {
+    navigate('/otp-verification', { state: { email } });
   };
 
   return (
@@ -42,7 +49,7 @@ export default function ForgotPassword() {
           {!sent ? (
             <>
               <h2 className="text-xl font-semibold text-white mb-2">Forgot your password?</h2>
-              <p className="text-sm text-slate-400 mb-6">Enter your institutional email and we'll send a secure reset link.</p>
+              <p className="text-sm text-slate-400 mb-6">Enter your institutional email and we'll send a 6-digit OTP to reset your password.</p>
 
               {error && (
                 <div className="mb-4 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs">{error}</div>
@@ -74,18 +81,24 @@ export default function ForgotPassword() {
                   disabled={loading}
                   className="w-full py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-sm rounded-xl transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Send Reset Link'}
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Send OTP'}
                 </button>
               </form>
             </>
           ) : (
             <div className="text-center py-4">
               <CheckCircle2 className="w-14 h-14 text-emerald-400 mx-auto mb-4" />
-              <h2 className="text-xl font-bold text-white mb-2">Check your inbox!</h2>
+              <h2 className="text-xl font-bold text-white mb-2">OTP Sent!</h2>
               <p className="text-sm text-slate-400 mb-6">
-                A password reset link has been sent to <span className="text-white font-medium">{email}</span>. It expires in 1 hour.
+                A 6-digit OTP has been sent to <span className="text-white font-medium">{email}</span>. It expires in 10 minutes and can be used only once.
               </p>
-              <p className="text-xs text-slate-500">Didn't receive it? Check spam or try again in a few minutes.</p>
+              <p className="text-xs text-slate-500 mb-6">Didn't receive it? Check your spam folder.</p>
+              <button
+                onClick={goToOtp}
+                className="w-full py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-sm rounded-xl transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                Continue to OTP Verification <ArrowRight className="w-4 h-4" />
+              </button>
             </div>
           )}
 
