@@ -18,14 +18,19 @@ const transporter = smtpConfigured
     })
   : null;
 
+export class SmtpNotConfiguredError extends Error {
+  constructor() {
+    super('SMTP_NOT_CONFIGURED');
+    this.name = 'SmtpNotConfiguredError';
+  }
+}
+
 export async function sendMail(to: string, subject: string, html: string) {
   if (!transporter) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('SMTP is not configured. Cannot send email.');
-    }
-    console.warn('[MAILER] SMTP not configured. Email would have been sent to:', to);
-    console.warn('[MAILER] Subject:', subject);
-    return;
+    // Critical: never pretend the email was delivered. Callers (e.g. the
+    // password-reset flow) must surface a failure so the UI does NOT report a
+    // false "OTP sent" success when no mail actually left the server.
+    throw new SmtpNotConfiguredError();
   }
   const info = await transporter.sendMail({
     from: process.env.SMTP_FROM || 'ProjectCollab AI <no-reply@projectcollab.ai>',

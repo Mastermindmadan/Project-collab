@@ -22,6 +22,12 @@ if ((process.env.NODE_ENV || 'development') === 'production') {
   if (!process.env.JWT_REFRESH_SECRET || process.env.JWT_REFRESH_SECRET === 'super-secret-refresh-key-projectcollab-ai-2026-xyz-abc') {
     throw new Error('FATAL: JWT_REFRESH_SECRET is unset or still using the insecure default. Set a strong random secret.');
   }
+  // Password-reset emails cannot be delivered without SMTP. Fail loudly so ops
+  // notices the misconfiguration instead of users getting silent failures.
+  const smtpConfigured = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+  if (!smtpConfigured) {
+    console.warn('[STARTUP] WARNING: SMTP is not configured (SMTP_HOST/SMTP_USER/SMTP_PASS). Password-reset OTP emails will NOT be delivered. Set these env vars to enable email delivery.');
+  }
 }
 
 // Imports routers

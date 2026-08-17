@@ -91,9 +91,14 @@ export default function Register() {
           )}
 
           <form onSubmit={handleSubmit} autoComplete="off" className="space-y-5">
-            <div className="hidden">
-              <input type="text" name="prevent-username" autoComplete="off" tabIndex={-1} />
-              <input type="password" name="prevent-password" autoComplete="new-password" tabIndex={-1} />
+            {/* Off-screen decoy username/password pair. Browsers and password
+                managers target inputs named "username"/"password" when autofilling
+                saved credentials; placing them off-screen (not display:none, which
+                autofill ignores) makes the manager fill these instead of the real
+                registration fields, keeping name/email starting empty. */}
+            <div aria-hidden="true" style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '1px', height: '1px', overflow: 'hidden' }}>
+              <input type="text" name="username" tabIndex={-1} autoComplete="username" readOnly onFocus={(e) => e.currentTarget.blur()} />
+              <input type="password" name="password" tabIndex={-1} autoComplete="new-password" readOnly onFocus={(e) => e.currentTarget.blur()} />
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>

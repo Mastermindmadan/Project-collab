@@ -516,7 +516,7 @@ export default function TaskBoard() {
           <DragDropContext onDragEnd={onDragEnd}>
             <div className="flex gap-5 overflow-x-auto pb-6" style={{ minHeight: '520px', scrollbarWidth: 'thin' }}>
               {filteredColumns.map((column) => (
-                <div key={column.id} className="flex flex-col flex-shrink-0 w-72">
+                <div key={column.id} className="flex flex-col flex-shrink-0 w-[82vw] sm:w-72 max-w-[340px]">
                   {/* Column Header */}
                   <div className={`flex items-center justify-between mb-4 pb-3 border-b-2 ${column.color}`}>
                     <div className="flex items-center gap-2">

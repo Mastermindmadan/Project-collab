@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import prisma from '../utils/prisma';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import crypto from 'crypto';
-import { sendMail } from '../utils/mailer';
+import { sendMail, SmtpNotConfiguredError } from '../utils/mailer';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
@@ -88,12 +88,24 @@ const sendPasswordResetOtp = async (email: string, name: string, otp: string) =>
     <p>Use the following one-time code to reset your password:</p>
     <p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:18px 0;">${otp}</p>
     <p>This code expires in ${PASSWORD_RESET_OTP_EXPIRY_MINUTES} minutes and can be used only once.</p>
-    <p>If you did not request this, you can safely ignore this email.</p>
+    <p>If you did not request this, you can safely ignore this email. No action is needed.</p>
     <hr/>
+    <p style="font-size:0.9em;color:#555;">For your security: never share this code with anyone. The ProjectCollab AI team will never ask for it.</p>
     <p style="font-size:0.9em;color:#555;">- The ProjectCollab AI Team</p>
   </body></html>`;
 
-  await sendMail(email, 'Your ProjectCollab AI Password Reset OTP', html);
+  try {
+    await sendMail(email, 'Password Reset OTP', html);
+  } catch (err) {
+    // In non-production (local dev) with SMTP unconfigured, surface the OTP on
+    // the server console so the flow can still be tested. This is explicitly
+    // gated away from production to avoid leaking the OTP in prod logs.
+    if (err instanceof SmtpNotConfiguredError && process.env.NODE_ENV !== 'production') {
+      console.log(`[DEV OTP] Password reset OTP for ${email}: ${otp}`);
+      return;
+    }
+    throw err;
+  }
 };
 
 const getValidPasswordResetTokens = async (userId: string) => {
@@ -393,6 +405,11 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
       const retryAfter = (error as any).retryAfterSeconds || PASSWORD_RESET_OTP_RESEND_COOLDOWN_SECONDS;
       return res.status(429).json({ error: `Please wait ${retryAfter}s before requesting another OTP.` });
     }
+    if (error instanceof SmtpNotConfiguredError) {
+      // Honest failure: email could not be delivered, so we must NOT report success.
+      console.error('[AUTH] Password reset email failed: SMTP not configured.');
+      return res.status(503).json({ error: 'We were unable to send the reset email. Please try again later.' });
+    }
     console.error(error);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
@@ -413,6 +430,10 @@ export const resendPasswordResetOtp = async (req: Request, res: Response) => {
     if ((error as Error).message === 'OTP_RESEND_COOLDOWN') {
       const retryAfter = (error as any).retryAfterSeconds || PASSWORD_RESET_OTP_RESEND_COOLDOWN_SECONDS;
       return res.status(429).json({ error: `Please wait ${retryAfter}s before requesting another OTP.` });
+    }
+    if (error instanceof SmtpNotConfiguredError) {
+      console.error('[AUTH] Password reset email (resend) failed: SMTP not configured.');
+      return res.status(503).json({ error: 'We were unable to send the reset email. Please try again later.' });
     }
     console.error(error);
     return res.status(500).json({ error: 'Internal Server Error' });
