@@ -66,7 +66,7 @@ export default function Register() {
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/20 rounded-full blur-3xl -z-10 animate-pulse" style={{ animationDuration: '6s' }}></div>
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl -z-10 animate-pulse" style={{ animationDuration: '8s' }}></div>
 
-      <form autoComplete="off" className="w-full max-w-lg">
+      <div className="w-full max-w-lg">
         {/* Brand Header */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center p-3 rounded-2xl bg-primary/10 border border-primary/20 glow-primary mb-3">
@@ -90,7 +90,11 @@ export default function Register() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} autoComplete="off" className="space-y-5">
+            <div className="hidden">
+              <input type="text" name="prevent-username" autoComplete="off" tabIndex={-1} />
+              <input type="password" name="prevent-password" autoComplete="new-password" tabIndex={-1} />
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1.5" htmlFor="name">
@@ -101,15 +105,16 @@ export default function Register() {
                     <UserIcon className="w-4 h-4" />
                   </div>
                   <input
-                    id="name"
-                    type="text"
-                    placeholder="Full Name"
-                    autoComplete="off"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white placeholder:text-slate-600 transition-all"
-                    required
-                  />
+                     id="name"
+                     type="text"
+                     name="reg_fullname"
+                     placeholder="Full Name"
+                     autoComplete="off"
+                     value={name}
+                     onChange={(e) => setName(e.target.value)}
+                     className="w-full pl-10 pr-4 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white placeholder:text-slate-600 transition-all"
+                     required
+                   />
                 </div>
               </div>
 
@@ -137,16 +142,17 @@ export default function Register() {
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
                   <Mail className="w-4 h-4" />
                 </div>
-                <input
-                  id="email"
-                  type="email"
-                  placeholder="Institutional Email"
-                  autoComplete="off"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white placeholder:text-slate-600 transition-all"
-                  required
-                />
+                  <input
+                     id="email"
+                     type="email"
+                     name="reg_email"
+                     placeholder="Institutional Email"
+                     autoComplete="off"
+                     value={email}
+                     onChange={(e) => setEmail(e.target.value)}
+                     className="w-full pl-10 pr-4 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white placeholder:text-slate-600 transition-all"
+                     required
+                   />
               </div>
             </div>
 
@@ -161,6 +167,7 @@ export default function Register() {
                 <input
                   id="password"
                   type="password"
+                  name="reg_password"
                   placeholder="••••••••••••"
                   autoComplete="new-password"
                   value={password}
@@ -177,14 +184,16 @@ export default function Register() {
                 Skills / Expertise (Tags)
               </label>
               <div className="flex gap-2 mb-2">
-                <input
-                  type="text"
-                  placeholder="React, Node.js, Python, UI Design"
-                  value={skillInput}
-                  onChange={(e) => setSkillInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && addSkill(e)}
-                  className="flex-1 px-4 py-2 bg-slate-950/40 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white placeholder:text-slate-600 transition-all"
-                />
+                 <input
+                   type="text"
+                   name="reg_skills"
+                   placeholder="React, Node.js, Python, UI Design"
+                   value={skillInput}
+                   onChange={(e) => setSkillInput(e.target.value)}
+                   onKeyDown={(e) => e.key === 'Enter' && addSkill(e)}
+                   autoComplete="off"
+                   className="flex-1 px-4 py-2 bg-slate-950/40 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white placeholder:text-slate-600 transition-all"
+                 />
                 <button
                   type="button"
                   onClick={addSkill}

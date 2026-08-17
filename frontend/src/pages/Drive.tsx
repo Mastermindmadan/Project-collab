@@ -134,7 +134,8 @@ export default function Drive() {
       if (type === 'text') {
         setPreviewUrl(typeof res.data === 'string' ? res.data : String(res.data || ''));
       } else {
-        const blob = new Blob([res.data as BlobPart]);
+        const contentType = String(res.headers['content-type'] || '');
+        const blob = new Blob([res.data as BlobPart], { type: contentType });
         setPreviewUrl(URL.createObjectURL(blob));
       }
     } catch (err: any) {

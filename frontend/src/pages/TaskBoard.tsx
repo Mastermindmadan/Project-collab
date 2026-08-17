@@ -420,12 +420,12 @@ export default function TaskBoard() {
         </div>
 
         {/* Project Selector dropdown */}
-        <div className="flex gap-2 items-center">
+        <div className="flex flex-wrap gap-2 items-center">
           {projects.length > 0 && (
             <select
               value={selectedProjectId}
               onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="px-3.5 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl focus:border-primary/50 outline-none text-xs text-white transition-all cursor-pointer font-semibold"
+              className="px-3.5 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl focus:border-primary/50 outline-none text-xs text-white transition-all cursor-pointer font-semibold min-w-[140px]"
             >
               {projects.map((p) => (
                 <option key={p.id} value={p.id} className="bg-slate-950">{p.title}</option>
@@ -530,7 +530,7 @@ export default function TaskBoard() {
                         setCreateStatus(column.id);
                         setShowCreateModal(true);
                       }}
-                      className="p-1 rounded hover:bg-slate-900 text-slate-500 hover:text-white transition-all cursor-pointer"
+                      className="p-2 rounded hover:bg-slate-900 text-slate-500 hover:text-white transition-all cursor-pointer"
                     >
                       <Plus className="w-4 h-4" />
                     </button>
@@ -584,7 +584,7 @@ export default function TaskBoard() {
                                   </div>
 
                                   {/* Title */}
-                                  <p className="text-xs font-bold text-white mb-2 leading-relaxed">{task.title}</p>
+                                  <p className="text-xs font-bold text-white mb-2 leading-relaxed truncate">{task.title}</p>
                                   {task.description && (
                                     <p className="text-[10px] text-slate-500 line-clamp-2 leading-relaxed mb-3">{task.description}</p>
                                   )}

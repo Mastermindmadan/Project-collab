@@ -15,7 +15,7 @@ import React, {
   useState, useEffect, useRef, useCallback, useMemo,
 } from 'react';
 import {
-  Send, Hash, Search, Smile, Phone, Video,
+  Send, Hash, Search, Smile,
   AlertCircle, Shield, Trash2, Copy, Edit3, Check, X, Users,
   MessageSquareOff,
 } from 'lucide-react';
@@ -463,7 +463,8 @@ export default function Chat() {
   // ─────────────────────────────────────────────
   const handleSwitchTeam = (teamId: string) => {
     if (teamId === activeTeamId) return;
-    // Clear unread badge for the team being switched to
+    setNewTeamName('');
+    setAddEmail('');
     setChannels(prev => prev.map(ch =>
       ch.id === teamId ? { ...ch, unread: 0 } : ch
     ));
@@ -514,23 +515,22 @@ export default function Chat() {
     setError(null);
     try {
       await api.post('/teams/add-member', { teamId, email: email.trim() });
-      // Refresh channels to reflect the new member list/count
+      setAddEmail('');
       const res = await api.get('/chat/channels');
       const raw: any[] = res.data.channels ?? [];
-      setChannels(prev => {
-        const fresh = raw.find(c => c.id === teamId);
-        if (!fresh) return prev;
-        return prev.map(ch =>
-          ch.id === teamId
-            ? {
-                ...ch,
-                memberCount: fresh.memberCount ?? ch.memberCount,
-                members: Array.isArray(fresh.members) ? fresh.members : ch.members,
-              }
-            : ch
-        );
-      });
-      setAddEmail('');
+      const mapped: TeamChannel[] = raw.map(ch => ({
+        id: ch.id,
+        displayName: ch.name.toLowerCase().replace(/\s+/g, '-'),
+        rawName: ch.name,
+        memberCount: ch.memberCount ?? 0,
+        lastMsg: ch.lastMessage
+          ? `${ch.lastMessage.senderName}: ${ch.lastMessage.content}`
+          : 'No messages yet',
+        unread: 0,
+        role: ch.role,
+        members: Array.isArray(ch.members) ? ch.members : [],
+      }));
+      setChannels(mapped);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to add member.');
     }
@@ -541,15 +541,21 @@ export default function Chat() {
     setError(null);
     try {
       await api.post('/teams/remove', { teamId, targetUserId });
-      setChannels(prev => prev.map(ch =>
-        ch.id === teamId
-          ? {
-              ...ch,
-              memberCount: Math.max(0, (ch.memberCount ?? 1) - 1),
-              members: (ch.members ?? []).filter(m => m.id !== targetUserId),
-            }
-          : ch
-      ));
+      const res = await api.get('/chat/channels');
+      const raw: any[] = res.data.channels ?? [];
+      const mapped: TeamChannel[] = raw.map(ch => ({
+        id: ch.id,
+        displayName: ch.name.toLowerCase().replace(/\s+/g, '-'),
+        rawName: ch.name,
+        memberCount: ch.memberCount ?? 0,
+        lastMsg: ch.lastMessage
+          ? `${ch.lastMessage.senderName}: ${ch.lastMessage.content}`
+          : 'No messages yet',
+        unread: 0,
+        role: ch.role,
+        members: Array.isArray(ch.members) ? ch.members : [],
+      }));
+      setChannels(mapped);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to remove member.');
     }
@@ -718,12 +724,6 @@ export default function Chat() {
               title="Team Members"
             >
               <Users className="w-4 h-4" />
-            </button>
-            <button className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-secondary transition-all" title="Voice">
-              <Phone className="w-4 h-4" />
-            </button>
-            <button className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-secondary transition-all" title="Video">
-              <Video className="w-4 h-4" />
             </button>
           </div>
         </div>

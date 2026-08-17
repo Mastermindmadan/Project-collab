@@ -20,10 +20,12 @@ const transporter = smtpConfigured
 
 export async function sendMail(to: string, subject: string, html: string) {
   if (!transporter) {
-    // Log the email content to console so developers can see it without real SMTP
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('SMTP is not configured. Cannot send email.');
+    }
     console.warn('[MAILER] SMTP not configured. Email would have been sent to:', to);
     console.warn('[MAILER] Subject:', subject);
-    return; // Silently skip – do not throw
+    return;
   }
   const info = await transporter.sendMail({
     from: process.env.SMTP_FROM || 'ProjectCollab AI <no-reply@projectcollab.ai>',

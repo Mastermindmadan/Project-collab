@@ -36,7 +36,7 @@ export default function Login() {
         description: 'Redirecting to dashboard...',
         style: { fontSize: '0.85rem', fontFamily: 'Inter, sans-serif' }
       });
-      navigate('/');
+      setTimeout(() => navigate('/'), 1200);
     } catch (err: any) {
       console.error(err);
       setError(err.response?.data?.error || 'Invalid credentials or connection error.');

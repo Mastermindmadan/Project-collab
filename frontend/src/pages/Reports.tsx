@@ -23,8 +23,9 @@ export default function Reports() {
   const [teams, setTeams] = useState<any[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [report, setReport] = useState<ReportData | null>(null);
-    const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // ─── Mobile-friendly download helper ──────────────────────────
   // On iOS Safari the `download` anchor attribute is ignored, so we fall
@@ -74,26 +75,30 @@ export default function Reports() {
   const fetchReport = async () => {
     setLoading(true);
     setReport(null);
+    setError(null);
     try {
       let res;
       if (selectedType === 'project') res = await api.get(`/reports/project/${selectedId}`);
       else if (selectedType === 'team') res = await api.get(`/reports/team/${selectedId}`);
       else if (selectedType === 'tasks') res = await api.get(`/reports/tasks?projectId=${selectedId}`);
       else if (selectedType === 'members') res = await api.get(`/reports/members?teamId=${selectedId}`);
-            else if (selectedType === 'github') {
-        const githubRes = await api.get(`/github/report/${selectedId}`, { responseType: 'blob' });
+      else if (selectedType === 'github') {
+        const githubRes = await api.get(`/github/report/${selectedId}`, { responseType: 'blob', timeout: 120000 });
         const blob = new Blob([githubRes.data], { type: 'application/pdf' });
         triggerDownload(blob, `github-report-${selectedId}-${Date.now()}.pdf`);
         setLoading(false);
         return;
       }
       setReport(res?.data || null);
-    } catch { } finally { setLoading(false); }
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to fetch report. Please try again.');
+    } finally { setLoading(false); }
   };
 
   const generatePDF = () => {
     if (!report) return;
     setGenerating(true);
+    setError(null);
     try {
       const doc = new jsPDF();
       doc.setFont('helvetica', 'bold');
@@ -139,6 +144,8 @@ export default function Reports() {
       // Use blob-based download for mobile compatibility (iOS Safari ignores download attr)
       const blob = doc.output('blob');
       triggerDownload(blob, `projectcollab-${selectedType}-report-${Date.now()}.pdf`);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to generate PDF. Please try again.');
     } finally { setGenerating(false); }
   };
 
@@ -156,6 +163,8 @@ export default function Reports() {
       XLSX.utils.book_append_sheet(wb, ws, 'Report');
       const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
       triggerDownload(new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `projectcollab-${selectedType}-report-${Date.now()}.xlsx`);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to generate Excel. Please try again.');
     } finally { setGenerating(false); }
   };
 
@@ -174,6 +183,13 @@ export default function Reports() {
         <h1 className="text-3xl font-extrabold text-foreground tracking-tight">Report Generator</h1>
         <p className="text-muted-foreground text-sm mt-1">Generate and export project, team & analytics reports as PDF, Excel, or CSV</p>
       </div>
+
+      {error && (
+        <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm flex items-center justify-between">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="p-1 hover:text-white">✕</button>
+        </div>
+      )}
 
       {/* Report Type Selector */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
