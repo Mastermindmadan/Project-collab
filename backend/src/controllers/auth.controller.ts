@@ -97,11 +97,14 @@ const sendPasswordResetOtp = async (email: string, name: string, otp: string) =>
   try {
     await sendMail(email, 'Password Reset OTP', html);
   } catch (err) {
-    // In non-production (local dev) with SMTP unconfigured, surface the OTP on
-    // the server console so the flow can still be tested. This is explicitly
-    // gated away from production to avoid leaking the OTP in prod logs.
-    if (err instanceof SmtpNotConfiguredError && process.env.NODE_ENV !== 'production') {
-      console.log(`[DEV OTP] Password reset OTP for ${email}: ${otp}`);
+    // When SMTP is unavailable, surface the OTP on the server console so the
+    // reset flow can still be exercised. This is gated (non-production OR the
+    // explicit OTP_CONSOLE_FALLBACK opt-in) so production never silently
+    // "succeeds" unless an operator deliberately enables it for testing.
+    const allowConsoleFallback =
+      process.env.NODE_ENV !== 'production' || process.env.OTP_CONSOLE_FALLBACK === 'true';
+    if (err instanceof SmtpNotConfiguredError && allowConsoleFallback) {
+      console.log(`[OTP FALLBACK] Password reset OTP for ${email}: ${otp}`);
       return;
     }
     throw err;
