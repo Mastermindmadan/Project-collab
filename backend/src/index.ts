@@ -141,13 +141,15 @@ const shutdown = async (signal: string) => {
   });
 };
 
-void prisma.$connect().then(() => {
-  server.listen(PORT, () => {
-    console.log(`====================================================`);
-    console.log(`🚀 ProjectCollab AI server running on port ${PORT}`);
-    console.log(`📁 Uploads served at /uploads`);
-    console.log(`====================================================`);
-  });
+server.listen(PORT, () => {
+  console.log(`====================================================`);
+  console.log(`🚀 ProjectCollab AI server running on port ${PORT}`);
+  console.log(`📁 Uploads served at /uploads`);
+  console.log(`====================================================`);
+
+  prisma.$connect()
+    .then(() => console.log('✅ Database connected successfully.'))
+    .catch((err) => console.error('⚠️ Database connection warning:', err.message));
 });
 
 process.on('SIGINT', () => { void shutdown('SIGINT'); });

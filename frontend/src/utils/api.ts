@@ -1,8 +1,9 @@
 import axios from 'axios';
 import { toast } from 'sonner';
 import { useAuthStore } from '../store/auth.store';
+import { VITE_API_URL, VITE_DEV } from './apiEnv';
 
-const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '');
+const API_URL = VITE_API_URL || (VITE_DEV ? 'http://localhost:5000/api' : '');
 
 if (!API_URL) {
   throw new Error('VITE_API_URL must be configured for production builds.');

@@ -44,6 +44,9 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/testdb?schema=public
+      # The Prisma schema declares `directUrl = env("DIRECT_URL")`; Prisma
+      # fails schema validation when the variable is missing.
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/testdb?schema=public
     defaults:
       run:
         working-directory: ./backend

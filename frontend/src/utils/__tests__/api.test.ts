@@ -1,6 +1,13 @@
 import api from '../api';
 import { useAuthStore } from '../../store/auth.store';
 
+// `import.meta.env` is undefined outside of Vite, so mock the env accessor
+// that `api.ts` reads the base URL from.
+jest.mock('../apiEnv', () => ({
+  VITE_API_URL: 'http://localhost:5000/api',
+  VITE_DEV: false,
+}));
+
 describe('api interceptor', () => {
   beforeEach(() => {
     localStorage.clear();
