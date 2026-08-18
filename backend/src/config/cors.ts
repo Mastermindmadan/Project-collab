@@ -31,6 +31,25 @@ export function isOriginAllowed(origin: string | undefined): boolean {
 
   // Support a `*` wildcard entry for convenience (e.g. rapid prototyping).
   if (allowed.includes('*')) return true;
+  if (allowed.includes(origin)) return true;
 
-  return allowed.includes(origin);
+  // Any localhost / 127.0.0.1 origin (any port) is a local dev server — allow
+  // it so dev ports beyond the defaults (e.g. 5174 when 5173 is busy, or
+  // `vite preview` on 4173) are never CORS-blocked.
+  try {
+    const host = new URL(origin).hostname;
+    const stripped = host.replace(/^\[|\]$/g, ''); // strip IPv6 brackets
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      stripped === '::1' ||
+      stripped === '0:0:0:0:0:0:0:1'
+    ) {
+      return true;
+    }
+  } catch {
+    // Malformed origin — fall through and disallow.
+  }
+
+  return false;
 }

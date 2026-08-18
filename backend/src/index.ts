@@ -4,7 +4,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
-import { getAllowedOrigins, isOriginAllowed } from './config/cors';
+import { isOriginAllowed } from './config/cors';
 
 // Load environment variables
 dotenv.config();
@@ -59,11 +59,14 @@ const app = express();
 const server = http.createServer(app);
 
 // Configure Socket.io
-const allowedOrigins = getAllowedOrigins();
 const io = new Server(server, {
   transports: ['websocket', 'polling'],
   cors: {
-    origin: allowedOrigins,
+    // Same CORS rules as the Express middleware (see src/config/cors.ts).
+    origin(origin, callback) {
+      if (isOriginAllowed(origin)) callback(null, true);
+      else callback(new Error('Origin not allowed by CORS'));
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
   },
 });
