@@ -3,40 +3,57 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+const isPlaceholder = (val?: string) => {
+  if (!val) return true;
+  const lower = val.toLowerCase();
+  return lower.includes('your-email') || lower.includes('your-app-password') || lower.includes('your-domain') || lower.includes('example.com');
+};
+
+const smtpUser = process.env.SMTP_USER;
+const smtpPass = process.env.SMTP_PASS;
+const smtpHost = process.env.SMTP_HOST;
+
 const smtpConfigured =
-  !!process.env.SMTP_USER && !!process.env.SMTP_PASS && !!process.env.SMTP_HOST;
+  !!smtpUser && !!smtpPass && !!smtpHost && !isPlaceholder(smtpUser) && !isPlaceholder(smtpPass);
 
 const transporter = smtpConfigured
   ? nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
+      host: smtpHost,
       port: Number(process.env.SMTP_PORT || 587),
       secure: Number(process.env.SMTP_PORT) === 465,
       auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
+        user: smtpUser,
+        pass: smtpPass,
       },
     })
   : null;
 
 export class SmtpNotConfiguredError extends Error {
-  constructor() {
-    super('SMTP_NOT_CONFIGURED');
+  constructor(message = 'SMTP_NOT_CONFIGURED') {
+    super(message);
     this.name = 'SmtpNotConfiguredError';
   }
 }
 
+export function isSmtpConfigured(): boolean {
+  return smtpConfigured;
+}
+
 export async function sendMail(to: string, subject: string, html: string) {
   if (!transporter) {
-    // Critical: never pretend the email was delivered. Callers (e.g. the
-    // password-reset flow) must surface a failure so the UI does NOT report a
-    // false "OTP sent" success when no mail actually left the server.
-    throw new SmtpNotConfiguredError();
+    throw new SmtpNotConfiguredError('SMTP server or credentials are not configured.');
   }
-  const info = await transporter.sendMail({
-    from: process.env.SMTP_FROM || 'ProjectCollab AI <no-reply@projectcollab.ai>',
-    to,
-    subject,
-    html,
-  });
-  console.log('[MAILER] Message sent:', info.messageId);
+  try {
+    const info = await transporter.sendMail({
+      from: process.env.SMTP_FROM || 'ProjectCollab AI <no-reply@projectcollab.ai>',
+      to,
+      subject,
+      html,
+    });
+    console.log('[MAILER] Message sent:', info.messageId);
+  } catch (err: any) {
+    console.error('[MAILER] Email delivery failed:', err.message);
+    throw new SmtpNotConfiguredError(`Email delivery failed: ${err.message}`);
+  }
 }
+

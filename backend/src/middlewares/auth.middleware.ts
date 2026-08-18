@@ -19,10 +19,15 @@ export interface AuthenticatedRequest extends Request {
 
 export const authenticateJWT = async (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
+  let token: string | undefined;
 
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.split(' ')[1];
+    token = authHeader.split(' ')[1];
+  } else if (req.query?.token && typeof req.query.token === 'string') {
+    token = req.query.token;
+  }
 
+  if (token) {
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as {
         id: string;
@@ -46,6 +51,6 @@ export const authenticateJWT = async (req: Request, res: Response, next: NextFun
       return res.status(403).json({ error: 'Invalid or expired token' });
     }
   } else {
-    res.status(401).json({ error: 'Authorization header is missing or malformed' });
+    res.status(401).json({ error: 'Authorization token is missing' });
   }
 };

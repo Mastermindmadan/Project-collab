@@ -66,7 +66,16 @@ interface Document {
   name: string;
   fileUrl: string;
   category: string;
+  version?: number;
   createdAt: string;
+  versions?: Array<{
+    id: string;
+    version: number;
+    fileUrl: string;
+    notes?: string;
+    createdAt: string;
+    uploadedBy?: { name: string };
+  }>;
 }
 
 interface Meeting {
@@ -518,15 +527,24 @@ export default function Projects() {
     }
   };
 
+  // Helper for document file URLs (local uploads vs Cloudinary)
+  const getFileDisplayUrl = (url: string) => {
+    if (!url) return '#';
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/api\/?$/, '');
+    return `${apiBase}${url.startsWith('/') ? '' : '/'}${url}`;
+  };
+
   // Recharts calculations
   const commitChartsData = useMemo(() => {
     if (!selectedProject?.gitAnalytics?.contributionData) {
-      return [
-        { name: 'Priya M.', commits: 15 },
-        { name: 'Arjun V.', commits: 8 },
-        { name: 'Sneha K.', commits: 5 },
-        { name: 'Kavya R.', commits: 2 },
-      ];
+      if (selectedProject?.team?.members) {
+        return selectedProject.team.members.map(m => ({
+          name: m.user.name,
+          commits: 0
+        }));
+      }
+      return [];
     }
     const data = selectedProject.gitAnalytics.contributionData;
     return Object.entries(data).map(([name, val]: [string, any]) => ({
@@ -995,27 +1013,67 @@ export default function Projects() {
                       {selectedProject.documents.map((d) => (
                         <div
                           key={d.id}
-                          onClick={() => setAnalyzingDocText(`Proposal document metadata: Name: ${d.name}, Category: ${d.category}. Content summary goes here...`)}
-                          className="p-4 bg-slate-900/30 border border-slate-850 hover:border-slate-800 rounded-2xl flex items-center justify-between gap-4 cursor-pointer transition-all hover:bg-slate-900/50"
+                          className="p-4 bg-slate-900/30 border border-slate-850 hover:border-slate-800 rounded-2xl flex flex-col gap-3 transition-all hover:bg-slate-900/50"
                         >
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 bg-primary/10 rounded-xl text-primary">
-                              <FileText className="w-4 h-4" />
+                          <div
+                            onClick={() => setAnalyzingDocText(`Proposal document metadata: Name: ${d.name}, Category: ${d.category}. Content summary goes here...`)}
+                            className="flex items-center justify-between gap-4 cursor-pointer"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-primary/10 rounded-xl text-primary">
+                                <FileText className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <p className="text-xs font-bold text-white">{d.name}</p>
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-primary/20 text-primary border border-primary/30">
+                                    v{d.version || 1}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-550 capitalize mt-0.5">{d.category} · {new Date(d.createdAt).toLocaleDateString()}</p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="text-xs font-bold text-white">{d.name}</p>
-                              <p className="text-[10px] text-slate-550 capitalize mt-0.5">{d.category} · {new Date(d.createdAt).toLocaleDateString()}</p>
+                            <div className="flex items-center gap-2">
+                              <a
+                                href={getFileDisplayUrl(d.fileUrl)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                title="Open / Download Document"
+                                className="p-2 bg-slate-850 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-all"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
                             </div>
                           </div>
-                          <a
-                            href={d.fileUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="p-2 bg-slate-850 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-all"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
+
+                          {/* Version History Drawer (if versions exist) */}
+                          {d.versions && d.versions.length > 0 && (
+                            <div className="pt-2 border-t border-slate-900 space-y-1.5">
+                              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Version History ({d.versions.length})</p>
+                              <div className="space-y-1">
+                                {d.versions.map((ver) => (
+                                  <div key={ver.id} className="flex items-center justify-between px-2.5 py-1.5 bg-slate-950/40 rounded-lg text-[10px]">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono text-primary font-bold">v{ver.version}</span>
+                                      <span className="text-slate-400">{ver.notes || 'Previous release'}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-slate-500">
+                                      <span>{new Date(ver.createdAt).toLocaleDateString()}</span>
+                                      <a
+                                        href={getFileDisplayUrl(ver.fileUrl)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-primary hover:underline font-semibold"
+                                      >
+                                        Download
+                                      </a>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1587,7 +1645,7 @@ export default function Projects() {
                       ref={fileInputRef}
                       type="file"
                       className="hidden"
-                      accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md"
+                      accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md,.png,.jpg,.jpeg,.gif,.webp,.svg,.zip,.csv"
                       onChange={handleFileSelect}
                     />
                     {selectedFile ? (

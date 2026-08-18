@@ -10,14 +10,18 @@ export default function ForgotPassword() {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
 
+  const [devOtp, setDevOtp] = useState<string | null>(null);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) return;
     setLoading(true);
     setError('');
     try {
-      await api.post('/auth/request-password-reset', { email });
-      // Persist the email for this reset session only (sessionStorage, not the OTP)
+      const res = await api.post('/auth/request-password-reset', { email });
+      if (res.data?.devOtp) {
+        setDevOtp(res.data.devOtp);
+      }
       try { sessionStorage.setItem('pcai-reset-email', email); } catch { /* ignore */ }
       setSent(true);
     } catch (err: any) {
@@ -28,7 +32,7 @@ export default function ForgotPassword() {
   };
 
   const goToOtp = () => {
-    navigate('/otp-verification', { state: { email } });
+    navigate('/otp-verification', { state: { email, devOtp } });
   };
 
   return (
@@ -88,11 +92,16 @@ export default function ForgotPassword() {
           ) : (
             <div className="text-center py-4">
               <CheckCircle2 className="w-14 h-14 text-emerald-400 mx-auto mb-4" />
-              <h2 className="text-xl font-bold text-white mb-2">OTP Sent!</h2>
-              <p className="text-sm text-slate-400 mb-6">
-                A 6-digit OTP has been sent to <span className="text-white font-medium">{email}</span>. It expires in 10 minutes and can be used only once.
+              <h2 className="text-xl font-bold text-white mb-2">OTP Generated!</h2>
+              <p className="text-sm text-slate-400 mb-4">
+                A 6-digit OTP has been issued for <span className="text-white font-medium">{email}</span>. It expires in 10 minutes.
               </p>
-              <p className="text-xs text-slate-500 mb-6">Didn't receive it? Check your spam folder.</p>
+              {devOtp && (
+                <div className="mb-5 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-mono">
+                  🔑 <strong>Dev Mode OTP Code: {devOtp}</strong>
+                </div>
+              )}
+              <p className="text-xs text-slate-500 mb-6">Didn't receive an email? Check your spam folder or server logs.</p>
               <button
                 onClick={goToOtp}
                 className="w-full py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-sm rounded-xl transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer"

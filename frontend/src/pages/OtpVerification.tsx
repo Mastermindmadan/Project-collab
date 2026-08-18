@@ -14,13 +14,15 @@ import api from '../utils/api';
 export default function OtpVerification() {
   const navigate = useNavigate();
   const location = useLocation();
-  const emailFromState = (location.state as { email?: string } | null)?.email ?? '';
+  const stateData = (location.state as { email?: string; devOtp?: string } | null);
+  const emailFromState = stateData?.email ?? '';
+  const initialDevOtp = stateData?.devOtp || null;
   const [email, setEmail] = useState<string>(emailFromState || '');
-  const [otp, setOtp] = useState('');
+  const [otp, setOtp] = useState(initialDevOtp || '');
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [error, setError] = useState('');
-  const [info, setInfo] = useState('');
+  const [info, setInfo] = useState(initialDevOtp ? `Dev Mode: OTP code ${initialDevOtp} auto-filled.` : '');
   const [cooldown, setCooldown] = useState(0);
 
   useEffect(() => {
@@ -47,9 +49,14 @@ export default function OtpVerification() {
     setError('');
     setInfo('');
     try {
-      await api.post('/auth/resend-password-reset-otp', { email });
-      setInfo('A new OTP has been sent to your email.');
-      setOtp('');
+      const res = await api.post('/auth/resend-password-reset-otp', { email });
+      if (res.data?.devOtp) {
+        setOtp(res.data.devOtp);
+        setInfo(`A new OTP has been generated. Dev code: ${res.data.devOtp}`);
+      } else {
+        setInfo('A new OTP has been sent to your email.');
+        setOtp('');
+      }
       setCooldown(60);
     } catch (err: any) {
       const msg = err.response?.data?.error;

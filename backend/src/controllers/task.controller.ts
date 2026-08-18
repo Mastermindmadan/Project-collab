@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { sendNotificationToUser } from '../utils/socket';
+import { recalculateProjectHealth } from '../utils/projectHealth';
 
 export const createTask = async (req: Request, res: Response) => {
   try {
@@ -70,6 +71,9 @@ export const createTask = async (req: Request, res: Response) => {
       });
       sendNotificationToUser(assigneeId, notif);
     }
+
+    // Trigger asynchronous project health recalculation
+    void recalculateProjectHealth(projectId);
 
     res.status(201).json({ message: 'Task created successfully', task });
   } catch (error) {
@@ -152,6 +156,9 @@ export const updateTask = async (req: Request, res: Response) => {
       sendNotificationToUser(assigneeId, notif);
     }
 
+    // Trigger asynchronous project health recalculation
+    void recalculateProjectHealth(task.projectId);
+
     res.json({ message: 'Task updated successfully', task: updatedTask });
   } catch (error) {
     console.error(error);
@@ -186,6 +193,9 @@ export const deleteTask = async (req: Request, res: Response) => {
     }
 
     await prisma.task.delete({ where: { id: taskId } });
+
+    // Trigger asynchronous project health recalculation
+    void recalculateProjectHealth(task.projectId);
 
     res.json({ message: 'Task deleted successfully.' });
   } catch (error) {

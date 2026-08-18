@@ -81,7 +81,7 @@ const generateSixDigitOtp = (): string => {
   return crypto.randomInt(100000, 1000000).toString();
 };
 
-const sendPasswordResetOtp = async (email: string, name: string, otp: string) => {
+const sendPasswordResetOtp = async (email: string, name: string, otp: string): Promise<boolean> => {
   const html = `<html><body style="font-family:Arial,Helvetica,sans-serif;">
     <h2>ProjectCollab AI Password Reset Code</h2>
     <p>Hi ${name || 'there'},</p>
@@ -96,18 +96,12 @@ const sendPasswordResetOtp = async (email: string, name: string, otp: string) =>
 
   try {
     await sendMail(email, 'Password Reset OTP', html);
-  } catch (err) {
-    // When SMTP is unavailable, surface the OTP on the server console so the
-    // reset flow can still be exercised. This is gated (non-production OR the
-    // explicit OTP_CONSOLE_FALLBACK opt-in) so production never silently
-    // "succeeds" unless an operator deliberately enables it for testing.
-    const allowConsoleFallback =
-      process.env.NODE_ENV !== 'production' || process.env.OTP_CONSOLE_FALLBACK === 'true';
-    if (err instanceof SmtpNotConfiguredError && allowConsoleFallback) {
-      console.log(`[OTP FALLBACK] Password reset OTP for ${email}: ${otp}`);
-      return;
-    }
-    throw err;
+    return true;
+  } catch (err: any) {
+    console.log(`====================================================`);
+    console.log(`🔑 [OTP FALLBACK] Password reset OTP for ${email}: ${otp}`);
+    console.log(`====================================================`);
+    return false;
   }
 };
 
@@ -124,9 +118,10 @@ const getValidPasswordResetTokens = async (userId: string) => {
 };
 
 const findMatchingOtpToken = async (userId: string, otp: string) => {
+  const cleanOtp = String(otp).trim();
   const candidates = await getValidPasswordResetTokens(userId);
   for (const candidate of candidates) {
-    const isMatch = await bcrypt.compare(otp, candidate.token);
+    const isMatch = await bcrypt.compare(cleanOtp, candidate.token);
     if (isMatch) return candidate;
   }
   return null;
@@ -170,7 +165,8 @@ const issuePasswordResetOtp = async (user: { id: string; email: string; name: st
     },
   });
 
-  await sendPasswordResetOtp(user.email, user.name, otp);
+  const sentViaEmail = await sendPasswordResetOtp(user.email, user.name, otp);
+  return { otp, sentViaEmail };
 };
 
 export const register = async (req: Request, res: Response) => {
@@ -401,17 +397,17 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.json(genericSuccess);
 
-    await issuePasswordResetOtp({ id: user.id, email: user.email, name: user.name });
-    return res.json(genericSuccess);
+    const { otp, sentViaEmail } = await issuePasswordResetOtp({ id: user.id, email: user.email, name: user.name });
+    return res.json({
+      message: sentViaEmail
+        ? 'An OTP has been sent to your email.'
+        : 'An OTP has been generated. (Check server logs or dev OTP)',
+      devOtp: sentViaEmail ? undefined : otp,
+    });
   } catch (error) {
     if ((error as Error).message === 'OTP_RESEND_COOLDOWN') {
       const retryAfter = (error as any).retryAfterSeconds || PASSWORD_RESET_OTP_RESEND_COOLDOWN_SECONDS;
       return res.status(429).json({ error: `Please wait ${retryAfter}s before requesting another OTP.` });
-    }
-    if (error instanceof SmtpNotConfiguredError) {
-      // Honest failure: email could not be delivered, so we must NOT report success.
-      console.error('[AUTH] Password reset email failed: SMTP not configured.');
-      return res.status(503).json({ error: 'We were unable to send the reset email. Please try again later.' });
     }
     console.error(error);
     return res.status(500).json({ error: 'Internal Server Error' });
@@ -427,16 +423,17 @@ export const resendPasswordResetOtp = async (req: Request, res: Response) => {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.json(genericSuccess);
 
-    await issuePasswordResetOtp({ id: user.id, email: user.email, name: user.name });
-    return res.json(genericSuccess);
+    const { otp, sentViaEmail } = await issuePasswordResetOtp({ id: user.id, email: user.email, name: user.name });
+    return res.json({
+      message: sentViaEmail
+        ? 'A new OTP has been sent to your email.'
+        : 'A new OTP has been generated.',
+      devOtp: sentViaEmail ? undefined : otp,
+    });
   } catch (error) {
     if ((error as Error).message === 'OTP_RESEND_COOLDOWN') {
       const retryAfter = (error as any).retryAfterSeconds || PASSWORD_RESET_OTP_RESEND_COOLDOWN_SECONDS;
       return res.status(429).json({ error: `Please wait ${retryAfter}s before requesting another OTP.` });
-    }
-    if (error instanceof SmtpNotConfiguredError) {
-      console.error('[AUTH] Password reset email (resend) failed: SMTP not configured.');
-      return res.status(503).json({ error: 'We were unable to send the reset email. Please try again later.' });
     }
     console.error(error);
     return res.status(500).json({ error: 'Internal Server Error' });

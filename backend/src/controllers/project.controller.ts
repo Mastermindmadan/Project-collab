@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { recalculateProjectHealth } from '../utils/projectHealth';
 
 export const createProject = async (req: Request, res: Response) => {
   try {
@@ -98,7 +99,15 @@ export const getProjectDetails = async (req: Request, res: Response) => {
             }
           }
         },
-        documents: true,
+        documents: {
+          include: {
+            versions: {
+              orderBy: { version: 'desc' }
+            },
+            uploadedBy: { select: { id: true, name: true } }
+          },
+          orderBy: { createdAt: 'desc' }
+        },
         meetings: {
           orderBy: { dateTime: 'asc' }
         },
@@ -131,58 +140,10 @@ export const getProjectDetails = async (req: Request, res: Response) => {
     }
 
     // Dynamic health calculation based on actual progress/metrics
-    const totalTasks = project.tasks.length;
-    const completedTasks = project.tasks.filter(t => t.status === 'COMPLETED').length;
-    const taskCompletionRate = totalTasks > 0 ? completedTasks / totalTasks : 0;
-
-    const commitsCount = project.gitAnalytics?.commitsCount || 0;
-    
-    // Count chat messages for this team
-    const chatActivityCount = await prisma.message.count({
-      where: { teamId: project.teamId }
-    });
-
-    const now = new Date();
-    const overdueTasksCount = project.tasks.filter(
-      t => t.status !== 'COMPLETED' && t.dueDate && new Date(t.dueDate) < now
-    ).length;
-
-    const overdueMilestonesCount = project.milestones.filter(
-      m => m.status !== 'COMPLETED' && new Date(m.dueDate) < now
-    ).length;
-
-    const overdueCount = overdueTasksCount + overdueMilestonesCount;
-
-    // Health score formula mirroring AIService
-    const taskScore = taskCompletionRate * 100 * 0.40;
-    const commitRatio = Math.min(commitsCount / 15, 1);
-    const commitScore = commitRatio * 100 * 0.30;
-    const chatRatio = Math.min(chatActivityCount / 10, 1);
-    const chatScore = chatRatio * 100 * 0.15;
-    const overduePenalty = Math.min(overdueCount * 8, 15);
-    
-    let baselineScore = taskScore + commitScore + chatScore;
-    if (totalTasks === 0) {
-      // If there are no tasks yet, starting baseline health is 70 (Attention Required), since no progress has started.
-      baselineScore = 70 + commitScore + chatScore;
-    }
-    const healthScore = Math.max(Math.min(Math.round(baselineScore - overduePenalty), 100), 10);
-
-    let status: 'HEALTHY' | 'ATTENTION' | 'RISK' = 'HEALTHY';
-    if (healthScore < 50) {
-      status = 'RISK';
-    } else if (healthScore < 75) {
-      status = 'ATTENTION';
-    }
-
-    // Update in database so it persists and matches the list view
-    if (project.healthScore !== healthScore || project.status !== status) {
-      await prisma.project.update({
-        where: { id: projectId },
-        data: { healthScore, status }
-      });
-      project.healthScore = healthScore;
-      project.status = status;
+    const healthResult = await recalculateProjectHealth(projectId);
+    if (healthResult) {
+      project.healthScore = healthResult.healthScore;
+      project.status = healthResult.status;
     }
 
     res.json({ project });
@@ -379,6 +340,9 @@ export const createMilestone = async (req: Request, res: Response) => {
       }
     });
 
+    // Trigger project health recalculation
+    void recalculateProjectHealth(projectId);
+
     res.status(201).json({ message: 'Milestone created successfully', milestone });
   } catch (error) {
     console.error(error);
@@ -423,6 +387,9 @@ export const updateMilestone = async (req: Request, res: Response) => {
         status: status || milestone.status
       }
     });
+
+    // Trigger project health recalculation
+    void recalculateProjectHealth(milestone.projectId);
 
     res.json({ message: 'Milestone updated successfully', milestone: updated });
   } catch (error) {
