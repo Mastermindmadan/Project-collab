@@ -4,7 +4,7 @@ import { useAuthStore } from '../store/auth.store';
 import api from '../utils/api';
 import { toast } from 'sonner';
 import {
-  Mail, Lock, Loader2, ArrowRight, Zap, GitBranch, CheckSquare,
+  Mail, Lock, Eye, EyeOff, Loader2, ArrowRight, Zap, GitBranch, CheckSquare,
   Users, Sparkles, ShieldCheck, Activity, Code2
 } from 'lucide-react';
 
@@ -14,6 +14,7 @@ export default function Login() {
 
   const [email, setEmail] = useState('rohan@university.edu');
   const [password, setPassword] = useState('password123');
+  const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -174,13 +175,22 @@ export default function Login() {
                 </div>
                 <input
                   id="password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   placeholder="••••••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="glass-input w-full !pl-11 pr-4 h-11 text-sm font-medium"
+                  className="glass-input w-full !pl-11 pr-11 h-11 text-sm font-medium"
                   required
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors z-10"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
             </div>
 

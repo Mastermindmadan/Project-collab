@@ -1,0 +1,23 @@
+TOTAL PROJECTS: 4
+DRIVE FILES FOUND: 9
+  [Campus Event Management App/a] projectcollab-project-report-1785817352910.pdf
+     fileUrl=https://res.cloudinary.com/hihyjmzz/image/upload/v1786458736/projectcollab/drive/drive-1786458734987-316509977_q040x3.pdf onDisk=remote preview=401 download=401
+  [Campus Event Management App/a] ProjectCollab_AI_Summary.pdf
+     fileUrl=https://res.cloudinary.com/hihyjmzz/raw/upload/v1786458173/projectcollab/drive/drive-1786458171002-769107066_dcgacj.pdf onDisk=remote preview=401 download=401
+  [Campus Event Management App/a] Dickinson_Sample_Slides.pptx
+     fileUrl=https://res.cloudinary.com/hihyjmzz/raw/upload/v1786454742/projectcollab/drive/drive-1786454734117-568983791_acvejq.pptx onDisk=remote preview=401 download=401
+  [Campus Event Management App/a] tobias-rademacher-NuBvAE6VfSM-unsplash.jpg
+     fileUrl=https://res.cloudinary.com/hihyjmzz/image/upload/v1786454642/projectcollab/drive/drive-1786454620104-398037871_j3ty4z.jpg onDisk=remote preview=401 download=401
+  [Campus Event Management App/a] 16677461116820732.jpg
+     fileUrl=https://res.cloudinary.com/hihyjmzz/image/upload/v1786454624/projectcollab/drive/drive-1786454620103-546943702_g9dkc3.jpg onDisk=remote preview=401 download=401
+  [Campus Event Management App/a] Screenshot 2026-07-06 212916.png
+     fileUrl=https://res.cloudinary.com/hihyjmzz/image/upload/v1786454588/projectcollab/drive/drive-1786454583485-257819003_byzbxa.png onDisk=remote preview=401 download=401
+  [Campus Event Management App/a] SIH_2025_Selected_Ministries_Winners_Summary (1).pdf
+     fileUrl=https://res.cloudinary.com/hihyjmzz/image/upload/v1786454558/projectcollab/drive/drive-1786454555703-621167143_oc0ose.pdf onDisk=remote preview=401 download=401
+  [ProjectCollab AI Platform] IMG-20260814-WA0002.jpg
+     fileUrl=/uploads/drive-1786782236270-218500099.jpg onDisk=false preview=404 download=404
+  [ProjectCollab AI Platform] SIH_2025_Selected_Ministries_Winners_Summary (1).pdf
+     fileUrl=https://res.cloudinary.com/hihyjmzz/raw/upload/v1786375483/projectcollab/drive/drive-1786375480861-462373069_ftyjbq.pdf onDisk=remote preview=401 download=401
+UPLOAD status: 200 | storageProvider: local | fileUrl: /uploads/drive-1787068423543-149567815.png
+  physical file exists on disk: false
+  preview: 404 | download: 404 | download bytes: 53
