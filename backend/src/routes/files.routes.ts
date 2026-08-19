@@ -1,11 +1,14 @@
 /**
  * files.routes.ts
- * 
+ *
  * Architecture:
- * - Preview  → 302 redirect to Cloudinary URL (browser fetches directly; CDN allows browser origins)
- * - Download → redirect to Cloudinary private_download_url API endpoint (API-authenticated, not CDN ACL)
- *              The private_download_url uses signature-based auth served by api.cloudinary.com, 
- *              which is NOT subject to CDN ACL restrictions.
+ * - Preview/Download → the backend streams remote files (Cloudinary CDN URLs)
+ *   back to the browser. Server-to-server fetches are NOT subject to browser
+ *   CORS or to a CDN redirect that would need valid api.cloudinary.com
+ *   credentials (a `private_download_url` signed with placeholder API secrets
+ *   returns 401). A signed private URL is used only as a fallback when the
+ *   public CDN stream fails.
+ * - Local files are served directly from disk via sendFile / download.
  */
 import { Router, Request, Response } from 'express';
 import { v2 as cloudinary } from 'cloudinary';
@@ -13,6 +16,7 @@ import path from 'path';
 import fs from 'fs';
 import prisma from '../utils/prisma';
 import { isCloudinaryConfigured } from '../utils/cloudinary';
+import { streamRemoteUrl } from '../utils/fileStream';
 import { authenticateJWT, AuthenticatedRequest } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -144,10 +148,11 @@ function resolveMime(mimeType: string | null | undefined, fileUrl: string): stri
  * Serves the file inline in the browser.
  *
  * Strategy:
- * - Cloudinary URL → redirect to Cloudinary's private_download_url API endpoint 
- *   with attachment=false. The browser fetches from api.cloudinary.com which is 
- *   NOT subject to CDN ACL restrictions.
- * - Local file → sendFile with correct Content-Type header.
+ * - Remote file → stream the stored CDN URL server-side. Public resources on
+ *   res.cloudinary.com are served without credentials; server-to-server
+ *   requests avoid browser CORS completely. Falls back to a signed private
+ *   download URL only if the CDN stream fails AND Cloudinary is configured.
+ * - Local file → sendFile with the correct Content-Type header.
  */
 router.get('/:id/preview', async (req: Request, res: Response) => {
   try {
@@ -157,17 +162,29 @@ router.get('/:id/preview', async (req: Request, res: Response) => {
     if (!file) return res.status(404).json({ success: false, message: 'File not found' });
     if (!(await verifyProjectAccess(authReq, file.projectId))) return res.status(403).json({ success: false, message: 'Access denied' });
 
-    if (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://')) {
-      if (isCloudinaryConfigured()) {
-        const parsed = parseCloudinaryUrl(file.fileUrl);
-        if (parsed) {
-          const previewUrl = buildPrivateDownloadUrl(parsed.resourceType, parsed.publicId, false);
-          console.log('[files/preview] Redirecting to Cloudinary API URL (no CDN ACL):', previewUrl.substring(0, 100));
-          return res.redirect(previewUrl);
+    const isRemote = file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://');
+    if (isRemote) {
+      const mime = resolveMime(file.mimeType, file.fileUrl);
+      try {
+        await streamRemoteUrl(file.fileUrl, res, { attachment: false, filename: file.name, mimeType: mime });
+        return;
+      } catch (remoteErr: any) {
+        console.warn('[files/preview] Remote stream failed:', remoteErr.message);
+        // Fallback: try a signed private download URL for authenticated/private assets.
+        if (isCloudinaryConfigured()) {
+          const parsed = parseCloudinaryUrl(file.fileUrl);
+          if (parsed) {
+            try {
+              const signedUrl = buildPrivateDownloadUrl(parsed.resourceType, parsed.publicId, false);
+              await streamRemoteUrl(signedUrl, res, { attachment: false, filename: file.name, mimeType: mime });
+              return;
+            } catch (signedErr: any) {
+              console.warn('[files/preview] Signed fallback failed:', signedErr.message);
+            }
+          }
         }
+        return res.status(502).json({ success: false, message: 'Preview failed to load. Please use Download instead.' });
       }
-      // Fallback: redirect directly to the stored URL (works if CDN ACL allows it)
-      return res.redirect(file.fileUrl);
     }
 
     // Local disk file
@@ -191,10 +208,11 @@ router.get('/:id/preview', async (req: Request, res: Response) => {
  * Forces a browser Save-As dialog.
  *
  * Strategy:
- * - Cloudinary URL → redirect to Cloudinary's private_download_url API endpoint
- *   with attachment=true. Cloudinary sets Content-Disposition: attachment on its end,
- *   causing the browser to save the file. Served from api.cloudinary.com (no CDN ACL).
- * - Local file → res.download() (sets Content-Disposition: attachment automatically).
+ * - Remote file → stream the stored CDN URL server-side and set
+ *   Content-Disposition: attachment. This avoids browser CORS and does not
+ *   depend on a signed api.cloudinary.com URL (which 401s with bad credentials).
+ *   Falls back to a signed private URL only when Cloudinary is configured.
+ * - Local file → res.download() (sets Content-Disposition: attachment).
  */
 router.get('/:id/download', async (req: Request, res: Response) => {
   try {
@@ -204,17 +222,28 @@ router.get('/:id/download', async (req: Request, res: Response) => {
     if (!file) return res.status(404).json({ success: false, message: 'File not found' });
     if (!(await verifyProjectAccess(authReq, file.projectId))) return res.status(403).json({ success: false, message: 'Access denied' });
 
-    if (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://')) {
-      if (isCloudinaryConfigured()) {
-        const parsed = parseCloudinaryUrl(file.fileUrl);
-        if (parsed) {
-          const downloadUrl = buildPrivateDownloadUrl(parsed.resourceType, parsed.publicId, true);
-          console.log('[files/download] Redirecting to Cloudinary API URL (attachment=true):', downloadUrl.substring(0, 100));
-          return res.redirect(downloadUrl);
+    const isRemote = file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://');
+    if (isRemote) {
+      const mime = resolveMime(file.mimeType, file.fileUrl);
+      try {
+        await streamRemoteUrl(file.fileUrl, res, { attachment: true, filename: file.name, mimeType: mime });
+        return;
+      } catch (remoteErr: any) {
+        console.warn('[files/download] Remote stream failed:', remoteErr.message);
+        if (isCloudinaryConfigured()) {
+          const parsed = parseCloudinaryUrl(file.fileUrl);
+          if (parsed) {
+            try {
+              const signedUrl = buildPrivateDownloadUrl(parsed.resourceType, parsed.publicId, true);
+              await streamRemoteUrl(signedUrl, res, { attachment: true, filename: file.name, mimeType: mime });
+              return;
+            } catch (signedErr: any) {
+              console.warn('[files/download] Signed fallback failed:', signedErr.message);
+            }
+          }
         }
+        return res.status(502).json({ success: false, message: 'File download failed. Please try again.' });
       }
-      // Fallback: redirect directly (browser may still open inline depending on content-type)
-      return res.redirect(file.fileUrl);
     }
 
     // Local disk file

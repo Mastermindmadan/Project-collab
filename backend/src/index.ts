@@ -110,6 +110,8 @@ app.get('/api/health', (_req, res) => {
 
 // Setup API routers
 app.use('/api/auth', authRoutes);
+import emailRoutes from './routes/email.routes';
+app.use('/api/email', emailRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/tasks', taskRoutes);

@@ -117,17 +117,7 @@ export class GitHubService {
         language: response.data.language
       };
     } catch (error) {
-      console.warn(`[GitHubService] getRepoInfo fallback used for '${cleanPath}'.`);
-      return {
-        name: cleanPath.split('/')[1] || cleanPath,
-        fullName: cleanPath,
-        description: 'Collaborative project repository workspace.',
-        stars: 142,
-        forks: 38,
-        openIssues: 4,
-        defaultBranch: 'main',
-        language: 'TypeScript'
-      };
+      throw error;
     }
   }
 
@@ -148,13 +138,7 @@ export class GitHubService {
         deletionsUnavailable: true
       }));
     } catch (error) {
-      console.warn(`[GitHubService] getCommits fallback used for '${cleanPath}'.`);
-      return [
-        { sha: 'a1b2c3d', message: 'feat: implement workspace core features & socket room isolation', author: 'Priya Mehta', date: new Date().toISOString(), additions: 142, deletions: 18, additionsUnavailable: false, deletionsUnavailable: false },
-        { sha: 'b4c5d6e', message: 'fix: resolve task drag alignment in Kanban board', author: 'Arjun Verma', date: new Date(Date.now() - 3600000 * 4).toISOString(), additions: 28, deletions: 5, additionsUnavailable: false, deletionsUnavailable: false },
-        { sha: 'f7g8h9i', message: 'docs: update project architecture specification', author: 'Sneha Kapoor', date: new Date(Date.now() - 3600000 * 24).toISOString(), additions: 65, deletions: 12, additionsUnavailable: false, deletionsUnavailable: false },
-        { sha: 'j0k1l2m', message: 'test: write controller authentication unit tests', author: 'Kavya Rao', date: new Date(Date.now() - 3600000 * 48).toISOString(), additions: 98, deletions: 3, additionsUnavailable: false, deletionsUnavailable: false },
-      ];
+      throw error;
     }
   }
 

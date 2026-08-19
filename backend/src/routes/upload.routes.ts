@@ -36,7 +36,7 @@ const allowedMimes = [
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
   'application/zip', 'application/x-zip-compressed',
-  'text/plain', 'text/csv',
+  'text/plain', 'text/csv', 'text/markdown', 'text/x-markdown',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ];

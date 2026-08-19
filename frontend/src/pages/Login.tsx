@@ -222,34 +222,7 @@ export default function Login() {
             </button>
           </form>
 
-          <div className="mt-6 p-3.5 rounded-2xl bg-secondary/40 border border-border">
-            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-2 text-center">
-              ⚡ Quick Demo Accounts (1-Click Login)
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => { setEmail('rohan@university.edu'); setPassword('password123'); }}
-                className="px-2 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-[11px] font-bold transition-all border border-primary/20 truncate"
-              >
-                Rohan (Owner)
-              </button>
-              <button
-                type="button"
-                onClick={() => { setEmail('priya@university.edu'); setPassword('password123'); }}
-                className="px-2 py-1.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 text-[11px] font-bold transition-all border border-purple-500/20 truncate"
-              >
-                Priya (Admin)
-              </button>
-              <button
-                type="button"
-                onClick={() => { setEmail('arjun@university.edu'); setPassword('password123'); }}
-                className="px-2 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-[11px] font-bold transition-all border border-emerald-500/20 truncate"
-              >
-                Arjun (ML Lead)
-              </button>
-            </div>
-          </div>
+
 
           <div className="mt-6 pt-5 border-t border-border text-center">
             <p className="text-xs text-muted-foreground">

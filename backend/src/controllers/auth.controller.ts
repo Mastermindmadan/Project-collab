@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import prisma from '../utils/prisma';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import crypto from 'crypto';
-import { sendMail, SmtpNotConfiguredError } from '../utils/mailer';
+import { sendPasswordResetEmail } from '../services/emailService';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
@@ -88,19 +88,21 @@ const sendPasswordResetOtp = async (email: string, name: string, otp: string): P
     <p>Use the following one-time code to reset your password:</p>
     <p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:18px 0;">${otp}</p>
     <p>This code expires in ${PASSWORD_RESET_OTP_EXPIRY_MINUTES} minutes and can be used only once.</p>
-    <p>If you did not request this, you can safely ignore this email. No action is needed.</p>
+    <p>If you did not request this, you can safely ignore this email.</p>
     <hr/>
     <p style="font-size:0.9em;color:#555;">For your security: never share this code with anyone. The ProjectCollab AI team will never ask for it.</p>
     <p style="font-size:0.9em;color:#555;">- The ProjectCollab AI Team</p>
   </body></html>`;
 
   try {
-    await sendMail(email, 'Password Reset OTP', html);
+    await sendPasswordResetEmail(email, name, otp);
     return true;
   } catch (err: any) {
-    console.log(`====================================================`);
-    console.log(`🔑 [OTP FALLBACK] Password reset OTP for ${email}: ${otp}`);
-    console.log(`====================================================`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('====================================================');
+      console.log(`🔑 [OTP FALLBACK] Password reset OTP for ${email}: ${otp}`);
+      console.log('====================================================');
+    }
     return false;
   }
 };
@@ -401,8 +403,7 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
     return res.json({
       message: sentViaEmail
         ? 'An OTP has been sent to your email.'
-        : 'An OTP has been generated. (Check server logs or dev OTP)',
-      devOtp: sentViaEmail ? undefined : otp,
+        : 'An OTP has been generated.',
     });
   } catch (error) {
     if ((error as Error).message === 'OTP_RESEND_COOLDOWN') {
@@ -428,7 +429,6 @@ export const resendPasswordResetOtp = async (req: Request, res: Response) => {
       message: sentViaEmail
         ? 'A new OTP has been sent to your email.'
         : 'A new OTP has been generated.',
-      devOtp: sentViaEmail ? undefined : otp,
     });
   } catch (error) {
     if ((error as Error).message === 'OTP_RESEND_COOLDOWN') {

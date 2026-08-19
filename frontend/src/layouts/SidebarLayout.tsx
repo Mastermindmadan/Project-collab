@@ -263,24 +263,6 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
                 </div>
               </div>
 
-              {/* Demo quick-fill */}
-              <div className="grid grid-cols-3 gap-1.5">
-                {[
-                  { email: 'priya@university.edu', label: 'Priya', color: 'text-purple-400 bg-purple-500/10 border-purple-500/20' },
-                  { email: 'arjun@university.edu', label: 'Arjun', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
-                  { email: 'sneha@university.edu', label: 'Sneha', color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
-                ].map(d => (
-                  <button
-                    key={d.email}
-                    type="button"
-                    onClick={() => { setAddEmail(d.email); setAddPassword('password123'); }}
-                    className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-all ${d.color}`}
-                  >
-                    {d.label}
-                  </button>
-                ))}
-              </div>
-
               <button
                 type="submit"
                 disabled={addLoading}

@@ -12,18 +12,40 @@ cloudinary.config({
 });
 
 /**
- * Checks whether Cloudinary environment variables are configured.
+ * Rejects placeholder / example credential values so a project that has not
+ * been wired to a real Cloudinary account does not silently attempt (and fail)
+ * uploads, corrupting local fallback storage.
+ */
+function isValidCredential(value: string | undefined): boolean {
+  if (!value) return false;
+  const v = value.trim();
+  if (v.length < 4) return false;
+  return ![
+    /^your[-_]/i, // "your-cloud-name", "your-api-key", ...
+    /^change_?me/i,
+    /^xxx/i,
+    /^.+<.+>$/, // "<...>" style placeholders
+  ].some((re) => re.test(v));
+}
+
+/**
+ * Checks whether Cloudinary is actually configured with real credentials.
+ * Returns false when the env vars hold examples, are empty, or too short.
  */
 export function isCloudinaryConfigured(): boolean {
-  return Boolean(
-    process.env.CLOUDINARY_CLOUD_NAME &&
-    process.env.CLOUDINARY_API_KEY &&
-    process.env.CLOUDINARY_API_SECRET
+  return (
+    isValidCredential(process.env.CLOUDINARY_CLOUD_NAME) &&
+    isValidCredential(process.env.CLOUDINARY_API_KEY) &&
+    isValidCredential(process.env.CLOUDINARY_API_SECRET)
   );
 }
 
 /**
- * Uploads a file from local disk to Cloudinary and deletes the temp file.
+ * Uploads a file from local disk to Cloudinary.
+ *
+ * On SUCCESS the temporary local file is removed (it is now redundant).
+ * On FAILURE the temp file is LEFT ON DISK so the caller can fall back to
+ * serving it from local storage without losing the upload.
  */
 export async function uploadLocalFileToCloudinary(
   filePath: string,
@@ -73,11 +95,9 @@ export async function uploadLocalFileToCloudinary(
       bytes: result.bytes,
     };
   } catch (error: any) {
-    if (fs.existsSync(filePath)) {
-      try {
-        fs.unlinkSync(filePath);
-      } catch (_) {}
-    }
+    // IMPORTANT: do NOT delete the temp file here — when this function is
+    // called as a best-effort primary storage, the caller falls back to local
+    // storage on failure and still needs the local file to exist.
     throw new Error(`Cloudinary upload failed: ${error.message || error}`);
   }
 }

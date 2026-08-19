@@ -8,6 +8,7 @@ import {
   uploadLocalFileToCloudinary,
   deleteFromCloudinary,
 } from '../utils/cloudinary';
+import { streamRemoteUrl } from '../utils/fileStream';
 import { authenticateJWT, AuthenticatedRequest } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -34,7 +35,7 @@ const driveAllowedMimes = [
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
   'application/zip', 'application/x-zip-compressed',
-  'text/plain', 'text/csv',
+  'text/plain', 'text/csv', 'text/markdown', 'text/x-markdown',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'audio/mpeg', 'audio/wav', 'audio/ogg',
@@ -318,7 +319,7 @@ router.delete('/files/:id', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/drive/files/:id/download — download file (redirects to Cloudinary if remote)
+// GET /api/drive/files/:id/download — download file (streams remote files, serves local from disk)
 router.get('/files/:id/download', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthenticatedRequest;
@@ -339,7 +340,13 @@ router.get('/files/:id/download', async (req: Request, res: Response) => {
     }
 
     if (file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://')) {
-      return res.redirect(file.fileUrl);
+      try {
+        await streamRemoteUrl(file.fileUrl, res, { attachment: true, filename: file.name, mimeType: file.mimeType });
+        return;
+      } catch (err: any) {
+        console.warn('[Drive Download] Remote stream failed:', err.message);
+        return res.status(502).json({ success: false, message: 'File download failed. Please try again.' });
+      }
     }
 
     const filePath = path.join(uploadsDir, path.basename(file.fileUrl));

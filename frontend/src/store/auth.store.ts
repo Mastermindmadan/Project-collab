@@ -84,7 +84,8 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set, get) => {
   const accounts = loadAccounts();
   const activeId = loadActiveId();
-  const activeAccount = activeId ? accounts.find(a => a.id === activeId) : accounts[0];
+  // If there's a stored active ID, use that account; otherwise do not fallback to the first account.
+  const activeAccount = activeId ? accounts.find(a => a.id === activeId) : undefined;
 
   return {
     user: activeAccount ? accountToUser(activeAccount) : null,
