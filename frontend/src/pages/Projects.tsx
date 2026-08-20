@@ -531,7 +531,10 @@ export default function Projects() {
   const getFileDisplayUrl = (url: string) => {
     if (!url) return '#';
     if (url.startsWith('http://') || url.startsWith('https://')) return url;
-    const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/api\/?$/, '');
+    // No hardcoded localhost fallback: if VITE_API_URL is unset, we cannot build an
+    // absolute URL — return the path as-is rather than silently pointing at localhost.
+    const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/api\/?$/, '');
+    if (!apiBase) return url;
     return `${apiBase}${url.startsWith('/') ? '' : '/'}${url}`;
   };
 

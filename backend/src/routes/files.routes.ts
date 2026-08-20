@@ -159,6 +159,7 @@ router.get('/:id/preview', async (req: Request, res: Response) => {
     const authReq = req as AuthenticatedRequest;
     if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
     const file = await findFileById(req.params.id);
+    console.log(`[files/preview] reqId=${req.params.id} found=${!!file} fileUrl=${file?.fileUrl ?? 'N/A'} projectId=${file?.projectId ?? 'N/A'} userId=${authReq.user?.id}`);
     if (!file) return res.status(404).json({ success: false, message: 'File not found' });
     if (!(await verifyProjectAccess(authReq, file.projectId))) return res.status(403).json({ success: false, message: 'Access denied' });
 
@@ -219,6 +220,7 @@ router.get('/:id/download', async (req: Request, res: Response) => {
     const authReq = req as AuthenticatedRequest;
     if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
     const file = await findFileById(req.params.id);
+    console.log(`[files/download] reqId=${req.params.id} found=${!!file} fileUrl=${file?.fileUrl ?? 'N/A'} projectId=${file?.projectId ?? 'N/A'} userId=${authReq.user?.id}`);
     if (!file) return res.status(404).json({ success: false, message: 'File not found' });
     if (!(await verifyProjectAccess(authReq, file.projectId))) return res.status(403).json({ success: false, message: 'Access denied' });
 
