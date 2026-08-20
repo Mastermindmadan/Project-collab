@@ -2,13 +2,17 @@
  * files.routes.ts
  *
  * Architecture:
- * - Preview/Download → the backend streams remote files (Cloudinary CDN URLs)
- *   back to the browser. Server-to-server fetches are NOT subject to browser
- *   CORS or to a CDN redirect that would need valid api.cloudinary.com
- *   credentials (a `private_download_url` signed with placeholder API secrets
- *   returns 401). A signed private URL is used only as a fallback when the
- *   public CDN stream fails.
- * - Local files are served directly from disk via sendFile / download.
+ * - File metadata lives in the database (DriveFile / Document rows). The
+ *   `fileUrl` column points at the actual bytes, which are stored in one of two
+ *   places:
+ *     1. Remote object storage (Cloudinary CDN) — a full https:// URL.
+ *     2. Local ephemeral disk — a `/uploads/<name>` path.
+ * - Preview/Download resolve the record, verify the caller is a member of the
+ *   owning project's team, then stream the bytes back to the browser.
+ *   Server-to-server fetches avoid browser CORS and any CDN credential issues.
+ *
+ * This module owns ONLY preview/download. Uploads are handled in
+ * upload.routes.ts / drive.routes.ts and must write a durable `fileUrl`.
  */
 import { Router, Request, Response } from 'express';
 import { v2 as cloudinary } from 'cloudinary';
@@ -33,23 +37,56 @@ interface FileRecord {
   name: string;
   mimeType: string | null;
   projectId: string;
+  source: 'driveFile' | 'document';
 }
 
+/**
+ * Looks up a file across every table that stores user files. This guarantees
+ * that a valid UUID from any part of the app (Drive, Documents, messages) is
+ * found as long as the row exists in the database.
+ */
 async function findFileById(id: string): Promise<FileRecord | null> {
   const drive = await prisma.driveFile.findUnique({ where: { id } });
-  if (drive) return { id: drive.id, fileUrl: drive.fileUrl, name: drive.name, mimeType: drive.mimeType, projectId: drive.projectId };
+  if (drive) {
+    return {
+      id: drive.id,
+      fileUrl: drive.fileUrl,
+      name: drive.name,
+      mimeType: drive.mimeType,
+      projectId: drive.projectId,
+      source: 'driveFile',
+    };
+  }
 
   const doc = await prisma.document.findUnique({ where: { id } });
-  if (doc) return { id: doc.id, fileUrl: doc.fileUrl, name: doc.name, mimeType: doc.mimeType, projectId: doc.projectId };
+  if (doc) {
+    return {
+      id: doc.id,
+      fileUrl: doc.fileUrl,
+      name: doc.name,
+      mimeType: doc.mimeType,
+      projectId: doc.projectId,
+      source: 'document',
+    };
+  }
 
   return null;
 }
 
 /**
  * Verifies that the authenticated user is a member of the team that owns the
- * project referenced by `projectId`. Returns the teamId on success.
+ * project referenced by `projectId`. Returns the teamId on success, or null
+ * when the project is missing or the user is not a member.
+ *
+ * A null result means "not authorized to access this file" — callers map it to
+ * 403. We deliberately do NOT distinguish "project missing" from "not a
+ * member" here: in both cases the requester must not learn whether the file
+ * exists, so 403 (not 404) is returned.
  */
-async function verifyProjectAccess(authReq: AuthenticatedRequest, projectId: string): Promise<string | null> {
+async function verifyProjectAccess(
+  authReq: AuthenticatedRequest,
+  projectId: string
+): Promise<string | null> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     select: { teamId: true },
@@ -84,21 +121,18 @@ function parseCloudinaryUrl(url: string): {
 
 /**
  * Generate a Cloudinary private download URL using API-level authentication.
- * These URLs are served by api.cloudinary.com (not the CDN), bypassing CDN ACL restrictions.
- * They are time-limited (expires_at) and work for both preview and forced download.
+ * These URLs are served by api.cloudinary.com (not the CDN), bypassing CDN ACL
+ * restrictions. They are time-limited (expires_at) and work for both preview
+ * and forced download.
  */
 function buildPrivateDownloadUrl(
   resourceType: 'image' | 'video' | 'raw',
   publicId: string,
   attachment: boolean
 ): string {
-  // cloudinary.utils.private_download_url generates:
-  //   https://api.cloudinary.com/v1_1/<cloud>/<resource_type>/download?public_id=...&signature=...
-  // This bypasses CDN ACL because it's an API endpoint, not a CDN URL.
   const expiresAt = Math.floor(Date.now() / 1000) + 3600; // 1 hour
 
   if (resourceType === 'raw') {
-    // For raw files, don't pass a format (the extension is part of the public_id)
     return cloudinary.utils.private_download_url(publicId, '', {
       resource_type: 'raw',
       attachment,
@@ -106,7 +140,6 @@ function buildPrivateDownloadUrl(
     });
   }
 
-  // For image/video: derive extension from publicId
   const ext = path.extname(publicId).slice(1).toLowerCase() || 'pdf';
   return cloudinary.utils.private_download_url(publicId, ext, {
     resource_type: resourceType,
@@ -140,6 +173,21 @@ function resolveMime(mimeType: string | null | undefined, fileUrl: string): stri
   return map[ext] ?? 'application/octet-stream';
 }
 
+/** Human-readable storage descriptor used purely for logging. */
+function describeStorage(fileUrl: string): { kind: 'remote' | 'local'; bucket?: string } {
+  if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+    try {
+      const host = new URL(fileUrl).host;
+      // For Cloudinary the "bucket" is the cloud name segment.
+      const cloudMatch = host.match(/res\.cloudinary\.com\/([^.]+)/);
+      return { kind: 'remote', bucket: cloudMatch ? `cloudinary:${cloudMatch[1]}` : host };
+    } catch {
+      return { kind: 'remote' };
+    }
+  }
+  return { kind: 'local' };
+}
+
 // ─── Routes ─────────────────────────────────────────────────────────────────
 
 /**
@@ -155,51 +203,39 @@ function resolveMime(mimeType: string | null | undefined, fileUrl: string): stri
  * - Local file → sendFile with the correct Content-Type header.
  */
 router.get('/:id/preview', async (req: Request, res: Response) => {
+  const reqId = req.params.id;
   try {
     const authReq = req as AuthenticatedRequest;
-    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
-    const file = await findFileById(req.params.id);
-    console.log(`[files/preview] reqId=${req.params.id} found=${!!file} fileUrl=${file?.fileUrl ?? 'N/A'} projectId=${file?.projectId ?? 'N/A'} userId=${authReq.user?.id}`);
-    if (!file) return res.status(404).json({ success: false, message: 'File not found' });
-    if (!(await verifyProjectAccess(authReq, file.projectId))) return res.status(403).json({ success: false, message: 'Access denied' });
 
-    const isRemote = file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://');
-    if (isRemote) {
-      const mime = resolveMime(file.mimeType, file.fileUrl);
-      try {
-        await streamRemoteUrl(file.fileUrl, res, { attachment: false, filename: file.name, mimeType: mime });
-        return;
-      } catch (remoteErr: any) {
-        console.warn('[files/preview] Remote stream failed:', remoteErr.message);
-        // Fallback: try a signed private download URL for authenticated/private assets.
-        if (isCloudinaryConfigured()) {
-          const parsed = parseCloudinaryUrl(file.fileUrl);
-          if (parsed) {
-            try {
-              const signedUrl = buildPrivateDownloadUrl(parsed.resourceType, parsed.publicId, false);
-              await streamRemoteUrl(signedUrl, res, { attachment: false, filename: file.name, mimeType: mime });
-              return;
-            } catch (signedErr: any) {
-              console.warn('[files/preview] Signed fallback failed:', signedErr.message);
-            }
-          }
-        }
-        return res.status(502).json({ success: false, message: 'Preview failed to load. Please use Download instead.' });
-      }
+    // 401 — unauthenticated
+    if (!authReq.user) {
+      console.warn(`[files/preview] 401 Unauthorized reqId=${reqId}`);
+      return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Local disk file
-    const filePath = path.join(uploadsDir, path.basename(file.fileUrl));
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ success: false, message: 'Physical file not found' });
+    // DB lookup
+    const file = await findFileById(reqId);
+    console.log(
+      `[files/preview] lookup reqId=${reqId} found=${!!file}` +
+        (file ? ` source=${file.source} projectId=${file.projectId} storage=${describeStorage(file.fileUrl).kind}/${describeStorage(file.fileUrl).bucket ?? 'local'} userId=${authReq.user.id}` : '')
+    );
+    // 404 — the file genuinely does not exist in the database
+    if (!file) {
+      console.warn(`[files/preview] 404 file not found in DB reqId=${reqId} userId=${authReq.user.id}`);
+      return res.status(404).json({ success: false, message: 'File not found' });
     }
-    const mime = resolveMime(file.mimeType, file.fileUrl);
-    res.setHeader('Content-Type', mime);
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.name)}"`);
-    res.sendFile(filePath);
+
+    // 403 — not a member of the owning project's team
+    const teamId = await verifyProjectAccess(authReq, file.projectId);
+    if (!teamId) {
+      console.warn(`[files/preview] 403 access denied reqId=${reqId} projectId=${file.projectId} userId=${authReq.user.id}`);
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    await serveFile(file, false, req, res);
   } catch (err: any) {
-    console.error('[files/preview]', err);
-    res.status(500).json({ success: false, message: err.message });
+    console.error(`[files/preview] 500 unexpected error reqId=${reqId}:`, err);
+    if (!res.headersSent) res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -207,57 +243,129 @@ router.get('/:id/preview', async (req: Request, res: Response) => {
  * GET /api/files/:id/download
  *
  * Forces a browser Save-As dialog.
- *
- * Strategy:
- * - Remote file → stream the stored CDN URL server-side and set
- *   Content-Disposition: attachment. This avoids browser CORS and does not
- *   depend on a signed api.cloudinary.com URL (which 401s with bad credentials).
- *   Falls back to a signed private URL only when Cloudinary is configured.
- * - Local file → res.download() (sets Content-Disposition: attachment).
  */
 router.get('/:id/download', async (req: Request, res: Response) => {
+  const reqId = req.params.id;
   try {
     const authReq = req as AuthenticatedRequest;
-    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
-    const file = await findFileById(req.params.id);
-    console.log(`[files/download] reqId=${req.params.id} found=${!!file} fileUrl=${file?.fileUrl ?? 'N/A'} projectId=${file?.projectId ?? 'N/A'} userId=${authReq.user?.id}`);
-    if (!file) return res.status(404).json({ success: false, message: 'File not found' });
-    if (!(await verifyProjectAccess(authReq, file.projectId))) return res.status(403).json({ success: false, message: 'Access denied' });
 
-    const isRemote = file.fileUrl.startsWith('http://') || file.fileUrl.startsWith('https://');
-    if (isRemote) {
-      const mime = resolveMime(file.mimeType, file.fileUrl);
-      try {
-        await streamRemoteUrl(file.fileUrl, res, { attachment: true, filename: file.name, mimeType: mime });
-        return;
-      } catch (remoteErr: any) {
-        console.warn('[files/download] Remote stream failed:', remoteErr.message);
-        if (isCloudinaryConfigured()) {
-          const parsed = parseCloudinaryUrl(file.fileUrl);
-          if (parsed) {
-            try {
-              const signedUrl = buildPrivateDownloadUrl(parsed.resourceType, parsed.publicId, true);
-              await streamRemoteUrl(signedUrl, res, { attachment: true, filename: file.name, mimeType: mime });
-              return;
-            } catch (signedErr: any) {
-              console.warn('[files/download] Signed fallback failed:', signedErr.message);
-            }
-          }
-        }
-        return res.status(502).json({ success: false, message: 'File download failed. Please try again.' });
-      }
+    if (!authReq.user) {
+      console.warn(`[files/download] 401 Unauthorized reqId=${reqId}`);
+      return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Local disk file
-    const filePath = path.join(uploadsDir, path.basename(file.fileUrl));
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ success: false, message: 'Physical file not found' });
+    const file = await findFileById(reqId);
+    console.log(
+      `[files/download] lookup reqId=${reqId} found=${!!file}` +
+        (file ? ` source=${file.source} projectId=${file.projectId} storage=${describeStorage(file.fileUrl).kind}/${describeStorage(file.fileUrl).bucket ?? 'local'} userId=${authReq.user.id}` : '')
+    );
+    if (!file) {
+      console.warn(`[files/download] 404 file not found in DB reqId=${reqId} userId=${authReq.user.id}`);
+      return res.status(404).json({ success: false, message: 'File not found' });
     }
-    res.download(filePath, file.name);
+
+    const teamId = await verifyProjectAccess(authReq, file.projectId);
+    if (!teamId) {
+      console.warn(`[files/download] 403 access denied reqId=${reqId} projectId=${file.projectId} userId=${authReq.user.id}`);
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    await serveFile(file, true, req, res);
   } catch (err: any) {
-    console.error('[files/download]', err);
-    res.status(500).json({ success: false, message: err.message });
+    console.error(`[files/download] 500 unexpected error reqId=${reqId}:`, err);
+    if (!res.headersSent) res.status(500).json({ success: false, message: err.message });
   }
 });
+
+/**
+ * Resolves a FileRecord to bytes and streams/serves them with the correct
+ * Content-Type and Content-Disposition. Handles both remote (Cloudinary) and
+ * local storage, and returns the appropriate status code when the underlying
+ * storage cannot be reached.
+ */
+async function serveFile(
+  file: FileRecord,
+  attachment: boolean,
+  _req: Request,
+  res: Response
+): Promise<void> {
+  const storage = describeStorage(file.fileUrl);
+  const mime = resolveMime(file.mimeType, file.fileUrl);
+
+  if (storage.kind === 'remote') {
+    console.log(
+      `[files/serve] remote ${attachment ? 'download' : 'preview'} id=${file.id} url=${file.fileUrl} mime=${mime}`
+    );
+    try {
+      await streamRemoteUrl(file.fileUrl, res, {
+        attachment,
+        filename: file.name,
+        mimeType: mime,
+      });
+      return;
+    } catch (remoteErr: any) {
+      console.warn(`[files/serve] remote stream failed id=${file.id}:`, remoteErr.message);
+      // Fallback: try a signed private download URL for authenticated/private
+      // Cloudinary assets when Cloudinary is actually configured.
+      if (isCloudinaryConfigured()) {
+        const parsed = parseCloudinaryUrl(file.fileUrl);
+        if (parsed) {
+          try {
+            const signedUrl = buildPrivateDownloadUrl(parsed.resourceType, parsed.publicId, attachment);
+            console.log(`[files/serve] retrying with signed URL id=${file.id}`);
+            await streamRemoteUrl(signedUrl, res, {
+              attachment,
+              filename: file.name,
+              mimeType: mime,
+            });
+            return;
+          } catch (signedErr: any) {
+            console.warn(`[files/serve] signed fallback failed id=${file.id}:`, signedErr.message);
+          }
+        }
+      }
+      if (!res.headersSent) {
+        res.status(502).json({
+          success: false,
+          message: attachment
+            ? 'File download failed. Please try again.'
+            : 'Preview failed to load. Please use Download instead.',
+        });
+      }
+      return;
+    }
+  }
+
+  // Local disk file
+  const filePath = path.join(uploadsDir, path.basename(file.fileUrl));
+  console.log(`[files/serve] local ${attachment ? 'download' : 'preview'} id=${file.id} path=${filePath}`);
+
+  if (!fs.existsSync(filePath)) {
+    // The database row exists but the physical bytes are gone (e.g. ephemeral
+    // platform storage was wiped between writes). The file genuinely no longer
+    // exists on storage, so 404 is the correct response — we never fabricate
+    // bytes or fall back to a different user's file.
+    console.error(
+      `[files/serve] 404 physical file missing id=${file.id} expectedPath=${filePath} ` +
+        `(the DB record references local storage but the bytes are not present)`
+    );
+    if (!res.headersSent) {
+      res.status(404).json({
+        success: false,
+        message: 'File not found on storage. The uploaded file is no longer available.',
+      });
+    }
+    return;
+  }
+
+  if (attachment) {
+    res.download(filePath, file.name);
+    return;
+  }
+
+  res.setHeader('Content-Type', mime);
+  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.name)}"`);
+  res.sendFile(filePath);
+}
 
 export default router;

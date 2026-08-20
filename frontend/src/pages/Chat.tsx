@@ -254,7 +254,7 @@ export default function Chat() {
 
     // Connect to the same origin — Vite proxy forwards /socket.io → backend:5000.
     // In production, VITE_SOCKET_URL can be set to the backend host directly.
-    const socketUrl = import.meta.env.VITE_SOCKET_URL ?? window.location.origin;
+    const socketUrl = import.meta.env.VITE_SOCKET_URL || (import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/\/api\/?$/, '') : window.location.origin);
 
     // Always create a fresh socket if none is alive (handles account switches
     // where we nulled out socketRef in the accessToken effect above)
@@ -358,6 +358,7 @@ export default function Chat() {
     socket.on('error-msg', onError);
 
     return () => {
+      socket.off('connect', joinRoom);
       socket.off('new-team-message', onNewMessage);
       socket.off('user-typing', onTyping);
       socket.off('online-team-members', onPresence);
@@ -399,6 +400,9 @@ export default function Chat() {
 
     if (socketRef.current?.connected) {
       socketRef.current.emit('send-team-message', { teamId: activeTeamId, content });
+      // Mark typing stopped so other members don't see a stuck typing bubble
+      if (typingTimer.current) { clearTimeout(typingTimer.current); typingTimer.current = null; }
+      socketRef.current.emit('typing', { teamId: activeTeamId, isTyping: false });
     } else {
       // REST fallback
       try {

@@ -88,13 +88,23 @@ export default function Drive() {
 
   const deleteFile = async (id: string) => {
     if (!confirm('Delete this file?')) return;
-    await api.delete(`/drive/files/${id}`);
+    try {
+      await api.delete(`/drive/files/${id}`);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to delete file. Please try again.');
+      return;
+    }
     loadDrive(selectedProject, currentFolderId);
   };
 
   const deleteFolder = async (id: string) => {
     if (!confirm('Delete this folder and all its contents?')) return;
-    await api.delete(`/drive/folders/${id}`);
+    try {
+      await api.delete(`/drive/folders/${id}`);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to delete folder. Please try again.');
+      return;
+    }
     loadDrive(selectedProject, currentFolderId);
   };
 

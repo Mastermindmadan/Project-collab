@@ -26,6 +26,9 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
   const [aiStatus, setAiStatus] = useState<'online' | 'slow' | 'unavailable'>('unavailable');
   const [activeProvider, setActiveProvider] = useState<'gemini' | 'groq' | 'openai'>('gemini');
   const [notifs, setNotifs] = useState<any[]>([]);
+  // ── AI usage/quota telemetry for the provider badge hover tooltip ───────────
+  const [aiUsage, setAiUsage] = useState<Record<string, { used: number; limit: number }>>({});
+  const [aiHealthDetail, setAiHealthDetail] = useState<any>(null);
 
 
   // Add account modal state
@@ -106,6 +109,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       .then((response) => {
         if (mounted) {
           setAiStatus('online');
+          setAiHealthDetail(response.data);
           if (response.data?.activeProvider) {
             setActiveProvider(response.data.activeProvider);
           }
@@ -114,6 +118,11 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       .catch(() => {
         if (mounted) setAiStatus('unavailable');
       });
+    api.get('/ai/usage')
+      .then((res) => {
+        if (mounted) setAiUsage(res.data?.usage || {});
+      })
+      .catch(() => {});
     return () => { mounted = false; };
   }, []);
 
@@ -136,6 +145,22 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
     groq: { label: 'Groq', badgeCls: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' },
     openai: { label: 'OpenAI GPT', badgeCls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
   } as const;
+
+  const aiFeatureLabels: Record<string, string> = {
+    planner: 'AI Planner',
+    analyzer: 'Requirement Analyzer',
+    risk: 'Risk Detection',
+    aipm: 'AI Project Manager',
+  };
+
+  // Derived per-feature quota rows for the hover tooltip (used / limit / remaining)
+  const usageEntries = Object.entries(aiUsage).map(([feature, v]) => ({
+    feature,
+    label: aiFeatureLabels[feature] || feature,
+    used: v?.used ?? 0,
+    limit: v?.limit ?? 0,
+    remaining: Math.max((v?.limit ?? 0) - (v?.used ?? 0), 0),
+  }));
 
   const currentProviderConfig = aiProviderLabels[activeProvider] || aiProviderLabels.gemini;
 
@@ -380,10 +405,64 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
 
           {/* Right Controls */}
           <div className="flex items-center gap-3 relative">
-            {/* AI Provider Indicator Badge */}
-            <div className={`px-2.5 py-1 rounded-xl text-xs font-semibold border flex items-center gap-1.5 ${currentProviderConfig.badgeCls}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${currentAiStatus.dot}`} />
-              <span>{currentProviderConfig.label}</span>
+            {/* AI Provider Indicator Badge — hover for usage/quota & rate tooltip */}
+            <div className="relative group">
+              <div className={`px-2.5 py-1 rounded-xl text-xs font-semibold border flex items-center gap-1.5 ${currentProviderConfig.badgeCls}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${currentAiStatus.dot}`} />
+                <span>{currentProviderConfig.label}</span>
+              </div>
+              <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 z-50 w-72 rounded-xl border border-border bg-slate-950/95 backdrop-blur p-4 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-extrabold text-purple-400">Gemini API</span>
+                  <span className={`text-[10px] font-bold uppercase flex items-center gap-1 ${currentAiStatus.text}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${currentAiStatus.dot}`} /> {currentAiStatus.label}
+                  </span>
+                </div>
+                <div className="space-y-1.5 text-[11px] text-slate-400">
+                  <p className="flex justify-between">
+                    <span>Active provider</span>
+                    <span className="font-semibold text-slate-300">{aiHealthDetail?.activeProvider ?? activeProvider}</span>
+                  </p>
+                  <p className="flex justify-between">
+                    <span>Key pool</span>
+                    <span className="font-semibold text-slate-300">{aiHealthDetail?.activeKeyDisplay ?? '—'}</span>
+                  </p>
+                  <p className="flex justify-between">
+                    <span>Keys / exhausted</span>
+                    <span className="font-semibold text-slate-300">
+                      {aiHealthDetail?.totalGeminiKeys ?? 0} / {aiHealthDetail?.exhaustedKeysCount ?? 0}
+                    </span>
+                  </p>
+                  <p className="flex justify-between">
+                    <span>Cache hits (saved credits)</span>
+                    <span className="font-semibold text-slate-300">{aiHealthDetail?.cacheHitCount ?? 0}</span>
+                  </p>
+                </div>
+                <div className="border-t border-border/60 mt-2.5" />
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Daily Quota (used / limit)</p>
+                {usageEntries.length === 0 ? (
+                  <p className="text-[11px] text-slate-500">No usage data yet — run an AI feature to get started.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {usageEntries.map((u) => {
+                      const pct = u.limit > 0 ? Math.round((u.used / u.limit) * 100) : 0;
+                      return (
+                        <div key={u.feature}>
+                          <div className="flex justify-between text-[11px]">
+                            <span className="text-slate-400">{u.label}</span>
+                            <span className={`font-semibold ${u.remaining === 0 ? 'text-red-400' : 'text-slate-300'}`}>
+                              {u.used} / {u.limit} {u.remaining === 0 ? '· used up' : `· ${u.remaining} left`}
+                            </span>
+                          </div>
+                          <div className="h-1 rounded-full bg-slate-800 mt-0.5">
+                            <div className="h-1 rounded-full bg-purple-500/70" style={{ width: `${Math.min(pct, 100)}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Notifications */}

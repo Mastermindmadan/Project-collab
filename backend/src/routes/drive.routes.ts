@@ -4,11 +4,10 @@ import path from 'path';
 import fs from 'fs';
 import prisma from '../utils/prisma';
 import {
-  isCloudinaryConfigured,
-  uploadLocalFileToCloudinary,
   deleteFromCloudinary,
 } from '../utils/cloudinary';
 import { streamRemoteUrl } from '../utils/fileStream';
+import { persistUpload } from '../utils/storage';
 import { authenticateJWT, AuthenticatedRequest } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -244,21 +243,16 @@ router.post('/:projectId/files', handleDriveUploadSingle('file'), async (req: Re
     // ALWAYS use the authenticated user as uploader
     const uploadedById = authReq.user.id;
 
-    let fileUrl = `/uploads/${req.file.filename}`;
-    let storageProvider = 'local';
+    let fileUrl: string;
+    let storageProvider: 'cloudinary' | 'local';
 
-    if (isCloudinaryConfigured()) {
-      try {
-        const cloudRes = await uploadLocalFileToCloudinary(
-          req.file.path,
-          'projectcollab/drive',
-          req.file.mimetype
-        );
-        fileUrl = cloudRes.url;
-        storageProvider = 'cloudinary';
-      } catch (cloudErr: any) {
-        console.warn('[Drive Upload] Cloudinary upload failed, falling back to local file:', cloudErr.message);
-      }
+    try {
+      const persisted = await persistUpload(req.file.path, 'projectcollab/drive', req.file.mimetype);
+      fileUrl = persisted.fileUrl;
+      storageProvider = persisted.storageProvider;
+    } catch (persistErr: any) {
+      if (fs.existsSync(req.file.path)) { try { fs.unlinkSync(req.file.path); } catch (_) {} }
+      return res.status(502).json({ success: false, message: persistErr.message || 'File storage failed' });
     }
 
     const file = await prisma.driveFile.create({
