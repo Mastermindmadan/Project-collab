@@ -4,7 +4,8 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
-import { isOriginAllowed } from './config/cors';
+import { isOriginAllowed, ALLOWED_METHODS, ALLOWED_HEADERS, USE_CREDENTIALS } from './config/cors';
+import { isCloudinaryConfigured } from './utils/cloudinary';
 
 // Load environment variables
 dotenv.config();
@@ -28,6 +29,20 @@ if ((process.env.NODE_ENV || 'development') === 'production') {
   if (!smtpConfigured) {
     console.warn('[STARTUP] WARNING: SMTP is not configured (SMTP_HOST/SMTP_USER/SMTP_PASS). Password-reset OTP emails will NOT be delivered. Set these env vars to enable email delivery.');
   }
+}
+
+// Cloudinary is the ONLY persistence path for file uploads — there is no
+// local-disk fallback anymore because Render's disk is ephemeral and wiped on
+// every deploy/restart. Warn loudly at boot when Cloudinary is missing/invalid
+// so the misconfiguration is visible in Render logs immediately instead of
+// surfacing through user-visible upload failures days later.
+if (!isCloudinaryConfigured()) {
+  console.warn(
+    '[STARTUP] WARNING: Cloudinary is not configured (CLOUDINARY_CLOUD_NAME, ' +
+      'CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET must all be set to valid, ' +
+      'non-placeholder values). File uploads will now FAIL with a 502 error. ' +
+      'Uploads will NOT fall back to local disk because it is ephemeral and wiped on every deploy.'
+  );
 }
 
 // Imports routers
@@ -62,17 +77,24 @@ const server = http.createServer(app);
 const io = new Server(server, {
   transports: ['websocket', 'polling'],
   cors: {
-    // Same CORS rules as the Express middleware (see src/config/cors.ts).
+    // Same CORS allow-list as the Express middleware (see src/config/cors.ts)
     origin(origin, callback) {
       if (isOriginAllowed(origin)) callback(null, true);
       else callback(new Error('Origin not allowed by CORS'));
     },
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    methods: ALLOWED_METHODS,
+    allowedHeaders: ALLOWED_HEADERS,
+    credentials: USE_CREDENTIALS,
   },
 });
 setIO(io);
 
 // Configure Express middlewares
+//
+// IMPORTANT: this must be registered BEFORE the API routers and before any
+// middleware that could reject requests. Preflight (OPTIONS) requests are
+// short-circuited here (preflightContinue: false) so they receive CORS headers
+// + a 204 status WITHOUT ever reaching the JWT authentication middleware.
 app.use(
   cors({
     origin(origin, callback) {
@@ -82,7 +104,11 @@ app.use(
         callback(null, false);
       }
     },
-    credentials: true,
+    methods: ALLOWED_METHODS,
+    allowedHeaders: ALLOWED_HEADERS,
+    credentials: USE_CREDENTIALS, // Bearer JWT auth — cookies are not used.
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
   })
 );
 app.use(express.json());
@@ -136,7 +162,9 @@ initChatSocket(io);
 startDeadlineReminderCron();
 
 // Start the server
-const PORT = process.env.PORT || 5000;
+// Production (Render) injects $PORT; fall back to 5000 only for local dev.
+// Explicitly bind 0.0.0.0 so Render's proxy can reach the listener.
+const PORT: number = Number(process.env.PORT) || 5000;
 
 const shutdown = async (signal: string) => {
   console.log(`Received ${signal}. Shutting down gracefully...`);
@@ -146,7 +174,7 @@ const shutdown = async (signal: string) => {
   });
 };
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`====================================================`);
   console.log(`🚀 ProjectCollab AI server running on port ${PORT}`);
   console.log(`📁 Uploads served at /uploads`);

@@ -1,25 +1,61 @@
-// Local dev origins that must ALWAYS work, regardless of the ALLOWED_ORIGINS
-// env var. They are merged in additively so that a placeholder or otherwise
-// misconfigured ALLOWED_ORIGINS value never silently breaks local development
-// (which was the root cause of the "can't log in / blocked by CORS" issue).
-const LOCAL_DEV_ORIGINS = [
+// src/config/cors.ts
+//
+// Centralized CORS allow-list for this application.
+//
+// Local dev origins AND the known production (Vercel) frontend are ALWAYS
+// allowed, regardless of the ALLOWED_ORIGINS env var. They are merged
+// additively so a placeholder or otherwise misconfigured ALLOWED_ORIGINS value
+// never silently blocks a known deployment.
+//
+// Environment awareness:
+//   - Development: http://localhost / http://127.0.0.1 (any port) always allowed.
+//   - Production:  https://project-collab-one.vercel.app always allowed, plus
+//                  anything listed in the ALLOWED_ORIGINS env var.
+const DEFAULT_ALLOWED_ORIGINS: string[] = [
+  // ── Local development (always allowed) ───────────────────────────────
   'http://localhost:5173',
   'http://localhost:3000',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:3000',
+  // ── Production frontend (Vercel — always allowed) ─────────────────────
+  'https://project-collab-one.vercel.app',
 ];
+
+// Backwards-compatible alias for any existing imports.
+export const LOCAL_DEV_ORIGINS = DEFAULT_ALLOWED_ORIGINS;
+
+/** HTTP methods the API + preflight must accept (incl. the OPTIONS preflight). */
+export const ALLOWED_METHODS: string[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
+
+/** Headers the API + preflight must accept (JWT auth travels via Authorization). */
+export const ALLOWED_HEADERS: string[] = [
+  'Content-Type',
+  'Authorization',
+  'X-Requested-With',
+  'Accept',
+  'Origin',
+];
+
+/**
+ * This app authenticates with a Bearer JWT (Authorization header) and a refresh
+ * token sent in the request body — it does NOT rely on browser cookies.
+ * CORS credentials must therefore stay disabled so we never echo
+ * `Access-Control-Allow-Credentials` for a cross-origin request.
+ */
+export const USE_CREDENTIALS = false;
 
 export function getAllowedOrigins(): string[] {
   const raw = process.env.ALLOWED_ORIGINS?.trim();
-  if (!raw) return [...LOCAL_DEV_ORIGINS];
+  if (!raw) return [...DEFAULT_ALLOWED_ORIGINS];
 
   const configured = raw
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-  // Merge local dev origins first so they can never be overridden away.
-  return [...new Set([...LOCAL_DEV_ORIGINS, ...configured])];
+  // Defaults are merged first so a bad ALLOWED_ORIGINS value can never remove
+  // the known-local/production origins.
+  return [...new Set([...DEFAULT_ALLOWED_ORIGINS, ...configured])];
 }
 
 export function isOriginAllowed(origin: string | undefined): boolean {

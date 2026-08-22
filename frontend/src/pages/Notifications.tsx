@@ -68,6 +68,13 @@ export default function Notifications() {
     const socket = io(WS_URL, {
       auth: { token: accessToken },
       transports: ['websocket', 'polling'],
+      // Bounded reconnect with exponential backoff: prevents an endless
+      // reconnect loop from hammering the Render backend with 429s.
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 10000,
+      randomizationFactor: 0.5,
     });
 
     socket.on('notification:new', (newNotif: Notification) => {
