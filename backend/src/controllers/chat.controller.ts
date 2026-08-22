@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { getIO } from '../utils/socket';
 
 /**
  * Get chat channels (teams user belongs to) with recent message preview
@@ -8,7 +9,10 @@ import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 export const getUserChannels = async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthenticatedRequest;
-    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+    if (!authReq.user) {
+      console.warn(`[chat/channels] AUTH 401 no user for ${req.method} ${req.originalUrl}`);
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
     const userTeams = await prisma.teamMember.findMany({
       where: { userId: authReq.user.id },
@@ -75,6 +79,7 @@ export const getTeamMessages = async (req: Request, res: Response) => {
     });
 
     if (!membership) {
+      console.warn(`[chat/messages] 403 userId=${authReq.user.id} teamId=${teamId} reason=not-a-member`);
       return res.status(403).json({ error: 'Forbidden: You are not a member of this team' });
     }
 
@@ -117,6 +122,7 @@ export const sendTeamMessage = async (req: Request, res: Response) => {
     });
 
     if (!membership) {
+      console.warn(`[chat/send] 403 userId=${authReq.user.id} teamId=${teamId} reason=not-a-member`);
       return res.status(403).json({ error: 'Forbidden: You are not a member of this team' });
     }
 
@@ -142,5 +148,73 @@ export const sendTeamMessage = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error sending message:', error);
     res.status(500).json({ error: 'Failed to send message' });
+  }
+};
+
+/**
+ * Delete a team chat message.
+ *
+ * Authorization (scoped to the SAME team that owns the message):
+ *   - the message's original sender can always delete it, OR
+ *   - a team OWNER / ADMIN (membership.role in the message's team) can delete
+ *     ANY message in that team, including other members'.
+ *
+ * A member of one team holding an admin role on it CANNOT delete a message from
+ * a different team: the teamId in the URL must match message.teamId, and the
+ * role check is performed against that team's membership row.
+ */
+export const deleteTeamMessage = async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { teamId, messageId } = req.params;
+
+    // Same membership lookup pattern used by getTeamMessages / sendTeamMessage.
+    const membership = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId } },
+    });
+
+    if (!membership) {
+      console.warn(`[chat/delete] 403 userId=${authReq.user.id} teamId=${teamId} reason=not-a-member`);
+      return res.status(403).json({ error: 'Forbidden: You are not a member of this team' });
+    }
+
+    // The message must exist AND belong to the SAME team being addressed — this
+    // prevents a team-A admin from deleting a message that lives in team B.
+    const message = await prisma.message.findUnique({ where: { id: messageId } });
+    if (!message || message.teamId !== teamId) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    const isSender = message.senderId === authReq.user.id;
+    const isTeamAdmin = membership.role === 'OWNER' || membership.role === 'ADMIN';
+
+    if (!isSender && !isTeamAdmin) {
+      console.warn(
+        `[chat/delete] 403 userId=${authReq.user.id} teamId=${teamId} messageId=${messageId} role=${membership.role} reason=not-sender-or-admin`
+      );
+      return res.status(403).json({ error: 'Only the sender or a team admin can delete this message' });
+    }
+
+    await prisma.message.delete({ where: { id: messageId } });
+
+    // Broadcast a live removal to the team room. This fires for BOTH
+    // self-deletions and admin/owner-initiated deletions of another member's
+    // message, so the message disappears for every connected team member in
+    // real time — not just for the person who deleted it.
+    const io = getIO();
+    if (io) {
+      io.to(`team:${teamId}`).emit('delete-team-message', {
+        id: message.id,
+        teamId,
+        deletedBy: authReq.user.id,
+      });
+    }
+
+    res.json({ success: true, id: message.id });
+  } catch (error) {
+    console.error('Error deleting message:', error);
+    res.status(500).json({ error: 'Failed to delete message' });
   }
 };

@@ -262,8 +262,13 @@ export default function Chat() {
       const socket = io(socketUrl, {
         auth: { token: accessToken },
         transports: ['websocket', 'polling'],
+        // Bounded reconnect with exponential backoff: prevents an endless
+        // reconnect loop from hammering the Render backend with 429s.
+        reconnection: true,
         reconnectionAttempts: 10,
-        reconnectionDelay: 500,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 10000,
+        randomizationFactor: 0.5,
       });
       socketRef.current = socket;
 
@@ -352,10 +357,19 @@ export default function Chat() {
       setError(data.message);
     };
 
+    // Remove a message in real time when it is deleted (by its sender OR by a
+    // team owner/admin), so it disappears for every connected team member —
+    // not just the person who deleted it.
+    const onMessageDeleted = (data: { id: string; teamId: string }) => {
+      if (data.teamId !== activeTeamId) return;
+      setMessages(prev => prev.filter(m => m.id !== data.id));
+    };
+
     socket.on('new-team-message', onNewMessage);
     socket.on('user-typing', onTyping);
     socket.on('online-team-members', onPresence);
     socket.on('error-msg', onError);
+    socket.on('delete-team-message', onMessageDeleted);
 
     return () => {
       socket.off('connect', joinRoom);
@@ -363,6 +377,7 @@ export default function Chat() {
       socket.off('user-typing', onTyping);
       socket.off('online-team-members', onPresence);
       socket.off('error-msg', onError);
+      socket.off('delete-team-message', onMessageDeleted);
     };
   }, [activeTeamId, accessToken, user?.id, user?.name]);
 
@@ -439,7 +454,20 @@ export default function Chat() {
   // ─────────────────────────────────────────────
   // Message actions
   // ─────────────────────────────────────────────
-  const deleteMessage = (id: string) => setMessages(prev => prev.filter(m => m.id !== id));
+  const deleteMessage = async (id: string) => {
+    if (!activeTeamId) return;
+    try {
+      await api.delete(`/chat/team/${activeTeamId}/message/${id}`);
+      setMessages(prev => prev.filter(m => m.id !== id));
+    } catch (err: any) {
+      const status = err.response?.status;
+      if (status === 403) {
+        setError('Only the sender or a team admin can delete this message.');
+      } else {
+        setError(err.response?.data?.error || 'Failed to delete message.');
+      }
+    }
+  };
   const copyMessage   = (content: string) => navigator.clipboard.writeText(content);
 
   const submitEdit = (id: string) => {
@@ -884,14 +912,14 @@ export default function Chat() {
                           <Copy className="w-3.5 h-3.5" />
                         </button>
                         {msg.isOwn && (
-                          <>
-                            <button onClick={() => { setEditingId(msg.id); setEditContent(msg.content); }} className="p-1 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground" title="Edit">
-                              <Edit3 className="w-3.5 h-3.5" />
-                            </button>
-                            <button onClick={() => deleteMessage(msg.id)} className="p-1 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive" title="Delete">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </>
+                          <button onClick={() => { setEditingId(msg.id); setEditContent(msg.content); }} className="p-1 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground" title="Edit">
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {(msg.isOwn || canManage) && (
+                          <button onClick={() => { void deleteMessage(msg.id); }} className="p-1 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive" title="Delete">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         )}
                       </div>
                     </div>
@@ -1050,12 +1078,14 @@ export default function Chat() {
               <Copy className="w-3.5 h-3.5" /> Copy Text
             </button>
             {msg.isOwn && (
+              <button onClick={() => { setEditingId(msg.id); setEditContent(msg.content); setContextMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-foreground hover:bg-secondary">
+                <Edit3 className="w-3.5 h-3.5" /> Edit Message
+              </button>
+            )}
+            {(msg.isOwn || canManage) && (
               <>
-                <button onClick={() => { setEditingId(msg.id); setEditContent(msg.content); setContextMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-foreground hover:bg-secondary">
-                  <Edit3 className="w-3.5 h-3.5" /> Edit Message
-                </button>
-                <div className="my-1 border-t border-border" />
-                <button onClick={() => { deleteMessage(msg.id); setContextMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-destructive hover:bg-destructive/10">
+                {msg.isOwn && <div className="my-1 border-t border-border" />}
+                <button onClick={() => { void deleteMessage(msg.id); setContextMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-destructive hover:bg-destructive/10">
                   <Trash2 className="w-3.5 h-3.5" /> Delete Message
                 </button>
               </>
