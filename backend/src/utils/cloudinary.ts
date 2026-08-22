@@ -12,6 +12,25 @@ cloudinary.config({
 });
 
 /**
+ * Re-applies the Cloudinary credentials from process.env.
+ *
+ * This module is reached very early by other modules and its import can be
+ * evaluated BEFORE dotenv.config() runs, which would snapshot `undefined`
+ * credentials into the SDK config and make every later upload fail with a 401
+ * even though the .env / environment actually holds valid values. Re-applying
+ * at call time guarantees the SDK uses the credentials that exist when the
+ * request runs.
+ */
+function applyEnvConfig(): void {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+    secure: true,
+  });
+}
+
+/**
  * Rejects placeholder / example credential values so a project that has not
  * been wired to a real Cloudinary account does not silently attempt (and fail)
  * uploads, corrupting local fallback storage.
@@ -44,8 +63,10 @@ export function isCloudinaryConfigured(): boolean {
  * Uploads a file from local disk to Cloudinary.
  *
  * On SUCCESS the temporary local file is removed (it is now redundant).
- * On FAILURE the temp file is LEFT ON DISK so the caller can fall back to
- * serving it from local storage without losing the upload.
+ * On FAILURE the temp file is LEFT ON DISK — there is intentionally NO
+ * local-disk fallback. `persistUpload` throws, and the calling route unlinks
+ * the temp file while rejecting the request with a 502. Leaving the file here
+ * lets the route perform that cleanup.
  */
 export async function uploadLocalFileToCloudinary(
   filePath: string,
@@ -55,6 +76,9 @@ export async function uploadLocalFileToCloudinary(
   if (!isCloudinaryConfigured()) {
     throw new Error('Cloudinary credentials are not configured in environment');
   }
+
+  // Refresh the SDK config from env now that the process is fully booted.
+  applyEnvConfig();
 
   // raw/upload URLs are BLOCKED by Cloudinary's account-level ACL on free plans.
   // Use 'image' for PDFs and documents — image/upload URLs are publicly accessible.
@@ -95,9 +119,10 @@ export async function uploadLocalFileToCloudinary(
       bytes: result.bytes,
     };
   } catch (error: any) {
-    // IMPORTANT: do NOT delete the temp file here — when this function is
-    // called as a best-effort primary storage, the caller falls back to local
-    // storage on failure and still needs the local file to exist.
+    // IMPORTANT: do NOT delete the temp file here — the route's error handler
+    // needs it for cleanup while rejecting the request (502). There is
+    // deliberately no fallback to local storage: Cloudinary is the only
+    // persistence path for new uploads.
     throw new Error(`Cloudinary upload failed: ${error.message || error}`);
   }
 }
@@ -122,6 +147,7 @@ export async function deleteFromCloudinary(
   mimeType?: string | null
 ): Promise<boolean> {
   if (!isCloudinaryConfigured() || !urlOrPublicId) return false;
+  applyEnvConfig();
 
   try {
     let publicId = urlOrPublicId;

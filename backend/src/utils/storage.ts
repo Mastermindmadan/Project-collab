@@ -4,16 +4,17 @@
  * Single source of truth for *where* an uploaded file's bytes are persisted.
  *
  * Storage model:
- * - Production: bytes MUST live in durable remote object storage (Cloudinary,
- *   configured via env). We never fall back to the platform's ephemeral local
- *   disk in production, because a `/uploads/<name>` reference would 404 after
- *   the next deploy/restart. If the remote upload fails we throw so the caller
- *   can reject the request instead of creating a broken database row.
- * - Development / tests: Cloudinary is normally not configured, so we fall back
- *   to local disk. This keeps the local flow working without secrets.
+ * - ALL uploads (dev and production) MUST be persisted to durable remote object
+ *   storage (Cloudinary, configured via env). We NEVER fall back to the
+ *   platform's ephemeral local disk: a `/uploads/<name>` reference would work
+ *   today but 404 after the next deploy/restart wipes the disk, silently
+ *   losing the file for users.
+ * - If Cloudinary env vars are missing/invalid, or the remote upload call
+ *   fails, `persistUpload` THROWS immediately so the caller can reject the
+ *   request (drive.routes.ts / upload.routes.ts surface this as a 502) instead
+ *   of creating a database row that pretends success.
  */
-import path from 'path';
-import { isCloudinaryConfigured, uploadLocalFileToCloudinary } from './cloudinary';
+import { uploadLocalFileToCloudinary } from './cloudinary';
 
 export interface PersistResult {
   fileUrl: string;
@@ -25,18 +26,15 @@ export async function persistUpload(
   cloudFolder: string,
   mimeType: string
 ): Promise<PersistResult> {
-  if (isCloudinaryConfigured()) {
-    try {
-      const cloudRes = await uploadLocalFileToCloudinary(localPath, cloudFolder, mimeType);
-      return { fileUrl: cloudRes.url, storageProvider: 'cloudinary' };
-    } catch (cloudErr: any) {
-      if (process.env.NODE_ENV === 'production') {
-        // Do NOT create a record that points at ephemeral local disk.
-        throw new Error(`Remote storage upload failed: ${cloudErr.message}`);
-      }
-      console.warn('[storage] Cloudinary upload failed, falling back to local file:', cloudErr.message);
-    }
+  try {
+    const cloudRes = await uploadLocalFileToCloudinary(localPath, cloudFolder, mimeType);
+    return { fileUrl: cloudRes.url, storageProvider: 'cloudinary' };
+  } catch (cloudErr: any) {
+    // NEVER fall back to the ephemeral local disk. A `/uploads/<name>` URL
+    // would render fine today and 404 tomorrow (Render's disk is wiped on every
+    // deploy/restart) with zero warning to the user. Throw immediately so the
+    // caller can reject the request with a 502 instead of recording a broken
+    // database row that pretends the upload succeeded.
+    throw new Error(`Remote storage upload failed: ${cloudErr?.message || cloudErr}`);
   }
-
-  return { fileUrl: `/uploads/${path.basename(localPath)}`, storageProvider: 'local' };
 }
