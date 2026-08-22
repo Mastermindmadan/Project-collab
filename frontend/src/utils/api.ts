@@ -39,6 +39,66 @@ const api = axios.create({
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Single-flight token refresh
+//
+// The backend ROTATES refresh tokens: every successful /auth/refresh-token call
+// deletes the old refresh token row and stores a new one. On page load, the
+// frontend fires several authenticated requests concurrently (Chat → /chat/channels,
+// SidebarLayout → /auth/profile, SidebarLayout → /misc/notifications). When the
+// stored access token has expired, ALL of them 403 at nearly the same instant.
+// The old interceptor let EACH failed request call refresh-token separately with
+// the SAME (about-to-be-rotated) refresh token — only the first could succeed, and
+// the losers could end up surfaced as an intermittent 403 on /chat/channels.
+//
+// This promise makes all concurrent 401/403s await a SINGLE refresh call and then
+// retry with the rotated access token. Requests that observe the 403 only after the
+// refresh has completed automatically pick up the already-rotated refresh token
+// from the store, which is still valid.
+let refreshInFlight: Promise<string | null> | null = null;
+
+/**
+ * Refreshes the access token exactly once across all concurrent failures.
+ * Resolves to the fresh access token, or null when there is no usable refresh
+ * token or the refresh request itself failed.
+ */
+const refreshAccessToken = async (): Promise<string | null> => {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      try {
+        const activeUser = useAuthStore.getState().user;
+        const accounts = useAuthStore.getState().accounts;
+        const activeAccount = accounts.find(a => a.id === activeUser?.id);
+        const refreshToken = activeAccount?.refreshToken || localStorage.getItem('refreshToken');
+        if (!refreshToken) return null;
+
+        const response = await axios.post(`${API_URL}/auth/refresh-token`, { refreshToken });
+        const { accessToken, refreshToken: nextRefreshToken } = response.data;
+
+        // Persist the rotated credentials so the store and cached accounts both
+        // reference the fresh token for all subsequent requests.
+        useAuthStore.setState({ accessToken });
+        if (activeUser?.id) {
+          const updatedAccounts = accounts.map(a =>
+            a.id === activeUser.id
+              ? { ...a, accessToken, refreshToken: nextRefreshToken || a.refreshToken }
+              : a
+          );
+          useAuthStore.setState({ accounts: updatedAccounts });
+          localStorage.setItem('pcai-accounts', JSON.stringify(updatedAccounts));
+        }
+        return accessToken;
+      } catch (refreshError) {
+        console.error('Session expired or invalid token refresh failed. Redirecting to login.', refreshError);
+        return null;
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+  }
+  return refreshInFlight;
+};
+
 // Request Interceptor: Attach access token to outgoing requests
 api.interceptors.request.use(
   (config) => {
@@ -77,35 +137,13 @@ api.interceptors.response.use(
     if ((status === 401 || status === 403) && originalRequest && !originalRequest._retry) {
       originalRequest._retry = true;
 
-      const activeUser = useAuthStore.getState().user;
-      const accounts = useAuthStore.getState().accounts;
-      const activeAccount = accounts.find(a => a.id === activeUser?.id);
-      const refreshToken = activeAccount?.refreshToken || localStorage.getItem('refreshToken');
+      // Share ONE refresh across every concurrent 401/403 (see single-flight note).
+      const newAccessToken = await refreshAccessToken();
 
-      if (refreshToken) {
-        try {
-          // Call refresh token endpoint
-          const response = await axios.post(`${API_URL}/auth/refresh-token`, { refreshToken });
-          const { accessToken, refreshToken: nextRefreshToken } = response.data;
-
-          // Save new token in Zustand store and updated accounts list
-          useAuthStore.setState({ accessToken });
-          if (activeUser?.id) {
-            const updatedAccounts = accounts.map(a =>
-              a.id === activeUser.id
-                ? { ...a, accessToken, refreshToken: nextRefreshToken || a.refreshToken }
-                : a
-            );
-            useAuthStore.setState({ accounts: updatedAccounts });
-            localStorage.setItem('pcai-accounts', JSON.stringify(updatedAccounts));
-          }
-
-          // Update authorization header and retry original request
-          originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-          return api(originalRequest);
-        } catch (refreshError) {
-          console.error('Session expired or invalid token refresh failed. Redirecting to login.');
-        }
+      if (newAccessToken) {
+        // Update authorization header and retry original request
+        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+        return api(originalRequest);
       }
 
       // If refresh failed or no refresh token, log out and redirect to login
