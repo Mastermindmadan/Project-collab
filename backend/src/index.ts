@@ -5,7 +5,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { isOriginAllowed, getAllowedOrigins, ALLOWED_METHODS, ALLOWED_HEADERS, USE_CREDENTIALS } from './config/cors';
-import { isCloudinaryConfigured } from './utils/cloudinary';
+import { isCloudinaryConfigured, logCloudinaryDiagnostics } from './utils/cloudinary';
 
 // Load environment variables
 dotenv.config();
@@ -36,12 +36,11 @@ if ((process.env.NODE_ENV || 'development') === 'production') {
 // every deploy/restart. Warn loudly at boot when Cloudinary is missing/invalid
 // so the misconfiguration is visible in Render logs immediately instead of
 // surfacing through user-visible upload failures days later.
+logCloudinaryDiagnostics();
 if (!isCloudinaryConfigured()) {
   console.warn(
-    '[STARTUP] WARNING: Cloudinary is not configured (CLOUDINARY_CLOUD_NAME, ' +
-      'CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET must all be set to valid, ' +
-      'non-placeholder values). File uploads will now FAIL with a 502 error. ' +
-      'Uploads will NOT fall back to local disk because it is ephemeral and wiped on every deploy.'
+    '[STARTUP] WARNING: Cloudinary is not configured properly (CLOUDINARY_CLOUD_NAME, ' +
+      'CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET must be set without quotes/spaces).'
   );
 }
 

@@ -3,29 +3,43 @@ import fs from 'fs';
 
 type CloudinaryResourceType = 'image' | 'raw' | 'video';
 
-// Configure Cloudinary credentials
+function sanitizeEnv(value: string | undefined): string {
+  if (!value) return '';
+  return value.trim().replace(/^['"]|['"]$/g, '');
+}
+
+/**
+ * Returns cleaned Cloudinary environment variables.
+ */
+export function getCloudinaryCredentials() {
+  return {
+    cloud_name: sanitizeEnv(process.env.CLOUDINARY_CLOUD_NAME),
+    api_key: sanitizeEnv(process.env.CLOUDINARY_API_KEY),
+    api_secret: sanitizeEnv(process.env.CLOUDINARY_API_SECRET),
+  };
+}
+
+// Initial configuration with sanitized credentials
+const initialCreds = getCloudinaryCredentials();
 cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
+  cloud_name: initialCreds.cloud_name,
+  api_key: initialCreds.api_key,
+  api_secret: initialCreds.api_secret,
   secure: true,
 });
 
 /**
  * Re-applies the Cloudinary credentials from process.env.
  *
- * This module is reached very early by other modules and its import can be
- * evaluated BEFORE dotenv.config() runs, which would snapshot `undefined`
- * credentials into the SDK config and make every later upload fail with a 401
- * even though the .env / environment actually holds valid values. Re-applying
- * at call time guarantees the SDK uses the credentials that exist when the
- * request runs.
+ * This guarantees the SDK uses the sanitized credentials that exist when
+ * the upload request runs.
  */
-function applyEnvConfig(): void {
+export function applyEnvConfig(): void {
+  const creds = getCloudinaryCredentials();
   cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
+    cloud_name: creds.cloud_name,
+    api_key: creds.api_key,
+    api_secret: creds.api_secret,
     secure: true,
   });
 }
@@ -33,7 +47,7 @@ function applyEnvConfig(): void {
 /**
  * Rejects placeholder / example credential values so a project that has not
  * been wired to a real Cloudinary account does not silently attempt (and fail)
- * uploads, corrupting local fallback storage.
+ * uploads.
  */
 function isValidCredential(value: string | undefined): boolean {
   if (!value) return false;
@@ -49,24 +63,41 @@ function isValidCredential(value: string | undefined): boolean {
 
 /**
  * Checks whether Cloudinary is actually configured with real credentials.
- * Returns false when the env vars hold examples, are empty, or too short.
  */
 export function isCloudinaryConfigured(): boolean {
+  const { cloud_name, api_key, api_secret } = getCloudinaryCredentials();
   return (
-    isValidCredential(process.env.CLOUDINARY_CLOUD_NAME) &&
-    isValidCredential(process.env.CLOUDINARY_API_KEY) &&
-    isValidCredential(process.env.CLOUDINARY_API_SECRET)
+    isValidCredential(cloud_name) &&
+    isValidCredential(api_key) &&
+    isValidCredential(api_secret)
   );
 }
 
 /**
- * Uploads a file from local disk to Cloudinary.
+ * Safe diagnostic logging for Cloudinary configuration.
+ * NEVER logs the API secret value.
+ */
+export function logCloudinaryDiagnostics(): void {
+  const { cloud_name, api_key, api_secret } = getCloudinaryCredentials();
+  console.log('[Cloudinary Diagnostics]', {
+    cloud_name: cloud_name
+      ? `Present (${cloud_name.length} chars, ends with '...${cloud_name.slice(-3)}')`
+      : 'MISSING',
+    api_key: api_key
+      ? `Present (${api_key.length} chars, ends with '...${api_key.slice(-3)}')`
+      : 'MISSING',
+    api_secret: api_secret
+      ? `Present (${api_secret.length} chars, masked)`
+      : 'MISSING',
+    isConfigured: isCloudinaryConfigured(),
+  });
+}
+
+/**
+ * Uploads a file from local disk to Cloudinary using official SDK signed upload.
  *
- * On SUCCESS the temporary local file is removed (it is now redundant).
- * On FAILURE the temp file is LEFT ON DISK — there is intentionally NO
- * local-disk fallback. `persistUpload` throws, and the calling route unlinks
- * the temp file while rejecting the request with a 502. Leaving the file here
- * lets the route perform that cleanup.
+ * On SUCCESS the temporary local file is removed.
+ * On FAILURE the temp file is left on disk for route cleanup.
  */
 export async function uploadLocalFileToCloudinary(
   filePath: string,
@@ -74,16 +105,13 @@ export async function uploadLocalFileToCloudinary(
   mimeType: string = 'application/octet-stream'
 ): Promise<{ url: string; publicId: string; bytes: number }> {
   if (!isCloudinaryConfigured()) {
-    throw new Error('Cloudinary credentials are not configured in environment');
+    logCloudinaryDiagnostics();
+    throw new Error('Cloudinary credentials are missing or invalid in environment');
   }
 
   // Refresh the SDK config from env now that the process is fully booted.
   applyEnvConfig();
 
-  // raw/upload URLs are BLOCKED by Cloudinary's account-level ACL on free plans.
-  // Use 'image' for PDFs and documents — image/upload URLs are publicly accessible.
-  // Preview is handled via Google Docs Viewer (avoids Edge PDF viewer quirks).
-  // Download is handled via browser fetch() + Blob.
   let resourceType: 'image' | 'video' | 'raw' | 'auto' = 'image';
   if (mimeType.startsWith('video/') || mimeType.startsWith('audio/')) {
     resourceType = 'video';
@@ -94,15 +122,17 @@ export async function uploadLocalFileToCloudinary(
     resourceType = 'image';
   }
 
+  // Standard signed upload options — do NOT pass restricted ACL fields like
+  // access_mode='public' which cause parameter signature mismatch on standard plans.
+  const uploadOptions: Record<string, any> = {
+    folder,
+    resource_type: resourceType,
+    use_filename: true,
+    unique_filename: true,
+  };
+
   try {
-    const result: UploadApiResponse = await cloudinary.uploader.upload(filePath, {
-      folder,
-      resource_type: resourceType,
-      type: 'upload',
-      access_mode: 'public',
-      use_filename: true,
-      unique_filename: true,
-    });
+    const result: UploadApiResponse = await cloudinary.uploader.upload(filePath, uploadOptions);
 
     // Unlink local temp file after successful upload
     if (fs.existsSync(filePath)) {
@@ -119,10 +149,7 @@ export async function uploadLocalFileToCloudinary(
       bytes: result.bytes,
     };
   } catch (error: any) {
-    // IMPORTANT: do NOT delete the temp file here — the route's error handler
-    // needs it for cleanup while rejecting the request (502). There is
-    // deliberately no fallback to local storage: Cloudinary is the only
-    // persistence path for new uploads.
+    console.error('[Cloudinary Error]', error);
     throw new Error(`Cloudinary upload failed: ${error.message || error}`);
   }
 }
