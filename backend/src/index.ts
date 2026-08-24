@@ -4,7 +4,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
-import { isOriginAllowed, ALLOWED_METHODS, ALLOWED_HEADERS, USE_CREDENTIALS } from './config/cors';
+import { isOriginAllowed, getAllowedOrigins, ALLOWED_METHODS, ALLOWED_HEADERS, USE_CREDENTIALS } from './config/cors';
 import { isCloudinaryConfigured } from './utils/cloudinary';
 
 // Load environment variables
@@ -178,6 +178,8 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`====================================================`);
   console.log(`🚀 ProjectCollab AI server running on port ${PORT}`);
   console.log(`📁 Uploads served at /uploads`);
+  console.log(`🌐 CORS ALLOWED_ORIGINS (raw env): "${process.env.ALLOWED_ORIGINS || ''}"`);
+  console.log(`🌐 CORS Allowed Origins (active):`, getAllowedOrigins());
   console.log(`====================================================`);
 
   prisma.$connect()

@@ -50,7 +50,7 @@ export function getAllowedOrigins(): string[] {
 
   const configured = raw
     .split(',')
-    .map((origin) => origin.trim())
+    .map((origin) => origin.trim().replace(/^['"]|['"]$/g, '').replace(/\/+$/, ''))
     .filter(Boolean);
 
   // Defaults are merged first so a bad ALLOWED_ORIGINS value can never remove
@@ -63,17 +63,18 @@ export function isOriginAllowed(origin: string | undefined): boolean {
   // requests) are always allowed.
   if (!origin) return true;
 
+  const cleanOrigin = origin.trim().replace(/\/+$/, '');
   const allowed = getAllowedOrigins();
 
   // Support a `*` wildcard entry for convenience (e.g. rapid prototyping).
   if (allowed.includes('*')) return true;
-  if (allowed.includes(origin)) return true;
+  if (allowed.includes(cleanOrigin)) return true;
 
   // Any localhost / 127.0.0.1 origin (any port) is a local dev server — allow
   // it so dev ports beyond the defaults (e.g. 5174 when 5173 is busy, or
   // `vite preview` on 4173) are never CORS-blocked.
   try {
-    const host = new URL(origin).hostname;
+    const host = new URL(cleanOrigin).hostname;
     const stripped = host.replace(/^\[|\]$/g, ''); // strip IPv6 brackets
     if (
       host === 'localhost' ||
@@ -87,5 +88,6 @@ export function isOriginAllowed(origin: string | undefined): boolean {
     // Malformed origin — fall through and disallow.
   }
 
+  console.warn(`[CORS REJECT] Origin "${origin}" (cleaned: "${cleanOrigin}") is not allowed. Active allowed origins:`, allowed);
   return false;
 }
