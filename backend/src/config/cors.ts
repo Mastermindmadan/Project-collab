@@ -42,16 +42,28 @@ export const ALLOWED_HEADERS: string[] = [
  * CORS credentials must therefore stay disabled so we never echo
  * `Access-Control-Allow-Credentials` for a cross-origin request.
  */
-export const USE_CREDENTIALS = false;
+/**
+ * Enable CORS credentials support so cross-origin requests using JWT Authorization
+ * headers or withCredentials are allowed by browser security policy.
+ */
+export const USE_CREDENTIALS = true;
 
 export function getAllowedOrigins(): string[] {
   const raw = process.env.ALLOWED_ORIGINS?.trim();
-  if (!raw) return [...DEFAULT_ALLOWED_ORIGINS];
+  const frontendUrl = process.env.FRONTEND_URL?.trim();
 
-  const configured = raw
-    .split(',')
-    .map((origin) => origin.trim().replace(/^['"]|['"]$/g, '').replace(/\/+$/, ''))
-    .filter(Boolean);
+  const configured: string[] = [];
+
+  if (frontendUrl) {
+    configured.push(frontendUrl.replace(/^['"]|['"]$/g, '').replace(/\/+$/, ''));
+  }
+
+  if (raw) {
+    raw.split(',').forEach((origin) => {
+      const clean = origin.trim().replace(/^['"]|['"]$/g, '').replace(/\/+$/, '');
+      if (clean) configured.push(clean);
+    });
+  }
 
   // Defaults are merged first so a bad ALLOWED_ORIGINS value can never remove
   // the known-local/production origins.
