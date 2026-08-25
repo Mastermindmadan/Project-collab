@@ -12,6 +12,7 @@ const isPlaceholder = (val?: string) => {
 const smtpUser = process.env.SMTP_USER;
 const smtpPass = process.env.SMTP_PASS;
 const smtpHost = process.env.SMTP_HOST;
+const smtpPort = Number(process.env.SMTP_PORT || 587);
 
 const smtpConfigured =
   !!smtpUser && !!smtpPass && !!smtpHost && !isPlaceholder(smtpUser) && !isPlaceholder(smtpPass);
@@ -19,8 +20,12 @@ const smtpConfigured =
 const transporter = smtpConfigured
   ? nodemailer.createTransport({
       host: smtpHost,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: Number(process.env.SMTP_PORT) === 465,
+      port: smtpPort, // env vars are strings — coerce to integer
+      // Port 465 => implicit SSL (secure:true). Port 587 (Gmail default) => STARTTLS:
+      // secure must be false, and requireTLS enforces the upgrade instead of
+      // silently falling back to an unencrypted connection.
+      secure: smtpPort === 465,
+      requireTLS: smtpPort !== 465,
       auth: {
         user: smtpUser,
         pass: smtpPass,
