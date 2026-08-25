@@ -1,12 +1,9 @@
-// Node >= 18 provides a global fetch implementation — no dependency needed.
-// const/global fetch typing comes from @types/node.
+// Node >= 18 provides a global fetch implementation — no external dependency needed.
+import { sendMail } from '../utils/mailer';
 
-// Environment variables for the email provider
-const EMAIL_API_URL = process.env.EMAIL_API_URL; // e.g., https://api.resend.com/emails
-const EMAIL_API_KEY = process.env.EMAIL_API_KEY;
-const EMAIL_FROM = process.env.EMAIL_FROM; // e.g., "no-reply@projectcollab.ai"
-const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME || 'ProjectCollab AI';
-
+// SMTP credentials (SMTP_HOST/SMTP_USER/SMTP_PASS) are the PRIMARY delivery path —
+// the same credentials ops already have configured in .env / render.yaml.
+// The HTTP API provider vars are an OPTIONAL fallback.
 export class EmailProviderNotConfiguredError extends Error {
   constructor(message = 'EMAIL_PROVIDER_NOT_CONFIGURED') {
     super(message);
@@ -14,17 +11,32 @@ export class EmailProviderNotConfiguredError extends Error {
   }
 }
 
+// Reads lazily each call so edits to the env are honored and we never cache unset values.
+const getHttpConfig = () => ({
+  url: process.env.EMAIL_API_URL, // e.g., https://api.resend.com/emails
+  key: process.env.EMAIL_API_KEY,
+  from: process.env.EMAIL_FROM, // e.g., "no-reply@example.com"
+  fromName: process.env.EMAIL_FROM_NAME || 'ProjectCollab AI',
+});
+
+const httpConfigured = () => {
+  const { url, key, from } = getHttpConfig();
+  return !!url && !!key && !!from;
+};
+
 /**
- * Sends a password‑reset OTP email via a generic HTTP email provider.
- * The function expects the provider to accept a POST request with JSON
- * containing `from`, `to`, `subject`, and `html` fields, and the API key
- * supplied via an `Authorization: Bearer <key>` header.
+ * Sends a password-reset OTP email.
+ *
+ * Delivery strategy (in order):
+ *   1. SMTP (SMTP_HOST / SMTP_USER / SMTP_PASS) via nodemailer — the PRIMARY path.
+ *      SMTP_FROM is used as the sender; falls back to no-reply otherwise.
+ *   2. Generic HTTP API provider (EMAIL_API_URL / EMAIL_API_KEY / EMAIL_FROM) — fallback.
+ *
+ * The generic HTTP provider expects a POST with JSON `from`, `to`, `subject`, `html`
+ * and the API key supplied via an `Authorization: Bearer <key>` header
+ * (e.g. https://api.resend.com/emails).
  */
 export async function sendPasswordResetEmail(to: string, name: string, otp: string) {
-  if (!EMAIL_API_URL || !EMAIL_API_KEY || !EMAIL_FROM) {
-    throw new EmailProviderNotConfiguredError('Missing email provider configuration');
-  }
-
   const subject = 'ProjectCollab Password Reset OTP';
   const html = `
     <html>
@@ -42,18 +54,46 @@ export async function sendPasswordResetEmail(to: string, name: string, otp: stri
     </html>
   `;
 
+  // PRIMARY path — SMTP (SMTP_HOST/SMTP_USER/SMTP_PASS). This is what ops configures
+  // in .env / render.yaml, so it must be used first when present.
+  const smtpReady =
+    process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS;
+  if (smtpReady) {
+    try {
+      await sendMail(to, subject, html);
+      return true;
+    } catch (err: any) {
+      // Don't silently swallow a real SMTP failure — surface it and let the
+      // caller decide (the controller falls back to logging the OTP in dev).
+      console.error(`[EMAIL SERVICE] SMTP delivery failed for ${to}: ${err.message}`);
+      if (httpConfigured()) {
+        // fall through to the HTTP API provider below
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  // FALLBACK path — generic HTTP email provider (e.g. Resend).
+  const http = getHttpConfig();
+  if (!http.url || !http.key || !http.from) {
+    throw new EmailProviderNotConfiguredError(
+      'No email provider configured. Set SMTP_HOST/SMTP_USER/SMTP_PASS (SMPT) or EMAIL_API_URL/EMAIL_API_KEY/EMAIL_FROM (HTTP API).'
+    );
+  }
+
   const payload = {
-    from: `${EMAIL_FROM_NAME} <${EMAIL_FROM}>`,
+    from: `${http.fromName} <${http.from}>`,
     to,
     subject,
     html,
   };
 
-  const response = await fetch(EMAIL_API_URL, {
+  const response = await fetch(http.url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${EMAIL_API_KEY}`,
+      Authorization: `Bearer ${http.key}`,
     },
     body: JSON.stringify(payload),
   });
