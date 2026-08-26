@@ -113,13 +113,19 @@ export async function uploadLocalFileToCloudinary(
   applyEnvConfig();
 
   let resourceType: 'image' | 'video' | 'raw' | 'auto' = 'image';
-  if (mimeType.startsWith('video/') || mimeType.startsWith('audio/')) {
+  if (mimeType.startsWith('image/')) {
+    // Real raster images (jpg/png/gif/webp/svg) → image type.
+    resourceType = 'image';
+  } else if (mimeType.startsWith('video/') || mimeType.startsWith('audio/')) {
+    // Audio/video → video type.
     resourceType = 'video';
-  } else if (mimeType.startsWith('image/') && !mimeType.includes('pdf')) {
-    resourceType = 'image';
   } else {
-    // PDFs, Word, Excel, PPT, zip, txt, etc. → image type (publicly accessible)
-    resourceType = 'image';
+    // PDFs, Word, Excel, PPT, zip, txt, CSV and anything else → 'raw'.
+    // 'raw' stores the bytes verbatim with no Cloudinary processing, which is
+    // REQUIRED for non-media files. Sending them as 'image' makes Cloudinary try
+    // to process/convert them and fails (400 Invalid file / 499 timeout), which
+    // the callers surface as a 502 to the client.
+    resourceType = 'raw';
   }
 
   // Standard signed upload options — do NOT pass restricted ACL fields like
@@ -189,9 +195,11 @@ export async function deleteFromCloudinary(
     const resourceType: CloudinaryResourceType =
       urlResourceType === 'image' || urlResourceType === 'video' || urlResourceType === 'raw'
         ? urlResourceType
-        : mimeType?.startsWith('video/') || mimeType?.startsWith('audio/')
-          ? 'video'
-          : 'image';
+        : mimeType?.startsWith('image/')
+          ? 'image'
+          : mimeType?.startsWith('video/') || mimeType?.startsWith('audio/')
+            ? 'video'
+            : 'raw';
 
     const result = await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
     return result.result === 'ok';
