@@ -80,32 +80,46 @@ export default function Drive() {
 
   const createFolder = async () => {
     if (!newFolderName.trim() || !selectedProject) return;
-    await api.post(`/drive/${selectedProject}/folders`, { name: newFolderName, parentId: currentFolderId });
-    setNewFolderName('');
-    setShowNewFolder(false);
-    loadDrive(selectedProject, currentFolderId);
+    try {
+      const res = await api.post(`/drive/${selectedProject}/folders`, { name: newFolderName, parentId: currentFolderId });
+      if (res.data?.folder) {
+        setFolders(prev => [...prev, res.data.folder]);
+      }
+      setNewFolderName('');
+      setShowNewFolder(false);
+      loadDrive(selectedProject, currentFolderId);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to create folder.');
+    }
   };
 
   const deleteFile = async (id: string) => {
     if (!confirm('Delete this file?')) return;
+    // Immediate optimistic update
+    setFiles(prev => prev.filter(f => f.id !== id));
+    setSearchResults(prev => prev ? prev.filter(f => f.id !== id) : null);
     try {
       await api.delete(`/drive/files/${id}`);
+      toast.success('File deleted successfully.');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to delete file. Please try again.');
-      return;
+    } finally {
+      loadDrive(selectedProject, currentFolderId);
     }
-    loadDrive(selectedProject, currentFolderId);
   };
 
   const deleteFolder = async (id: string) => {
     if (!confirm('Delete this folder and all its contents?')) return;
+    // Immediate optimistic update
+    setFolders(prev => prev.filter(f => f.id !== id));
     try {
       await api.delete(`/drive/folders/${id}`);
+      toast.success('Folder deleted successfully.');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to delete folder. Please try again.');
-      return;
+    } finally {
+      loadDrive(selectedProject, currentFolderId);
     }
-    loadDrive(selectedProject, currentFolderId);
   };
 
   const [previewFile, setPreviewFile] = useState<DriveFile | null>(null);
@@ -243,8 +257,15 @@ export default function Drive() {
             projectId={selectedProject}
             uploadedById={user.id}
             driveMode={true}
-            folderId={currentFolderId || undefined}
-            onUploaded={() => { loadDrive(selectedProject, currentFolderId); setShowUpload(false); }}
+            onUploaded={(doc) => {
+              if (doc) {
+                setFiles(prev => [doc, ...prev]);
+                setSearchResults(null);
+              }
+              loadDrive(selectedProject, currentFolderId);
+              setShowUpload(false);
+              toast.success('File uploaded successfully.');
+            }}
           />
         </div>
       )}

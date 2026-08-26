@@ -281,16 +281,22 @@ export default function TaskBoard() {
   // Delete Task handler
   const handleDeleteTask = async (taskId: string) => {
     if (!window.confirm('Are you sure you want to delete this task?')) return;
+    // Immediate optimistic removal
+    setColumns(prev => prev.map(col => ({
+      ...col,
+      tasks: col.tasks.filter(t => t.id !== taskId)
+    })));
+    setActiveTask(null);
     try {
       setActionLoading(true);
       await api.delete(`/tasks/${taskId}`);
-      setActiveTask(null);
-      await loadProjectTasks(selectedProjectId);
+      showToast('Task deleted successfully!');
     } catch (err) {
       console.error(err);
       alert('Failed to delete task.');
     } finally {
       setActionLoading(false);
+      if (selectedProjectId) loadProjectTasks(selectedProjectId);
     }
   };
 

@@ -6,7 +6,7 @@ import {
   FolderOpen, Plus, Search, Star, Users,
   Calendar, Github, Brain, Settings as SettingsIcon,
   ArrowLeft, CheckCircle2, ChevronRight, Loader2, FileText,
-  TrendingUp, ExternalLink, Grid3X3, List, X, Upload, Link2, CheckCircle
+  TrendingUp, ExternalLink, Grid3X3, List, X, Upload, Link2, CheckCircle, Trash2
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell
@@ -369,6 +369,7 @@ export default function Projects() {
 
     try {
       setActionLoading(true);
+      let newDoc: any = null;
 
       if (docUploadMode === 'file' && selectedFile) {
         // Real multipart file upload
@@ -379,21 +380,30 @@ export default function Projects() {
         formData.append('uploadedById', currentUser?.id || '');
         if (docName) formData.append('description', docName);
 
-        await api.post('/upload', formData, {
+        const res = await api.post('/upload', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
           timeout: 120000,
         });
+        newDoc = res.data?.document;
       } else if (docUploadMode === 'url' && docName && docUrl) {
         // URL / cloud link registration
-        await api.post('/projects/document', {
+        const res = await api.post('/projects/document', {
           projectId: selectedProject.id,
           name: docName,
           fileUrl: docUrl,
           category: docCategory
         });
+        newDoc = res.data?.document;
       } else {
         showToast('Please select a file or provide a document name and URL.', 'error');
         return;
+      }
+
+      if (newDoc) {
+        setSelectedProject(prev => prev ? {
+          ...prev,
+          documents: [newDoc, ...(prev.documents || [])]
+        } : null);
       }
 
       setDocName('');
@@ -408,6 +418,23 @@ export default function Projects() {
       showToast('Failed to upload document.', 'error');
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleDeleteDoc = async (docId: string) => {
+    if (!selectedProject || !window.confirm('Delete this document?')) return;
+    // Immediate optimistic update
+    setSelectedProject(prev => prev ? {
+      ...prev,
+      documents: (prev.documents || []).filter(d => d.id !== docId)
+    } : null);
+    try {
+      await api.delete(`/upload/${docId}`);
+      showToast('Document deleted successfully!');
+    } catch (err: any) {
+      showToast(err.response?.data?.message || 'Failed to delete document.', 'error');
+    } finally {
+      await loadProjectDetails(selectedProject.id);
     }
   };
 
@@ -1047,6 +1074,13 @@ export default function Projects() {
                               >
                                 <ExternalLink className="w-3.5 h-3.5" />
                               </a>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleDeleteDoc(d.id); }}
+                                title="Delete Document"
+                                className="p-2 bg-slate-850 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded-lg transition-all"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             </div>
                           </div>
 
