@@ -57,6 +57,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 logs/
+server-log.txt
 
 # ── Coverage / Test output ────────────────────────────────────
 coverage/

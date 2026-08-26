@@ -81,6 +81,33 @@ const generateSixDigitOtp = (): string => {
   return crypto.randomInt(100000, 1000000).toString();
 };
 
+// ─── OTP brute-force guard ───────────────────────────────────────────────
+// In-memory consecutive-failure tracker keyed by (normalized) email. It is a
+// complement to the IP-based otpRequestRateLimiter: after a small number of
+// wrong guesses against a single code, the outstanding OTP is invalidated so
+// a fresh code must be requested. This enforces the "single-use" promise.
+const otpFailedAttempts = new Map<string, { count: number }>();
+const OTP_MAX_FAILED_ATTEMPTS = 5;
+
+const clearOtpFailures = (email: string) => otpFailedAttempts.delete(email);
+
+/**
+ * Records a failed OTP guess. Returns true when the attempt threshold has been
+ * reached (and the outstanding reset code has been invalidated), false otherwise.
+ */
+const registerOtpFailure = async (email: string, userId: string): Promise<boolean> => {
+  const normalized = email.toLowerCase();
+  const entry = otpFailedAttempts.get(normalized) ?? { count: 0 };
+  entry.count += 1;
+  otpFailedAttempts.set(normalized, entry);
+
+  if (entry.count >= OTP_MAX_FAILED_ATTEMPTS) {
+    otpFailedAttempts.delete(normalized);
+    await prisma.token.deleteMany({ where: { userId, type: 'PASSWORD_RESET' } });
+    return true;
+  }
+  return false;
+};
 const sendPasswordResetOtp = async (email: string, name: string, otp: string): Promise<boolean> => {
   const html = `<html><body style="font-family:Arial,Helvetica,sans-serif;">
     <h2>ProjectCollab AI Password Reset Code</h2>
@@ -98,6 +125,7 @@ const sendPasswordResetOtp = async (email: string, name: string, otp: string): P
     await sendPasswordResetEmail(email, name, otp);
     return true;
   } catch (err: any) {
+    console.error('[AUTH CONTROLLER] Failed to send password reset OTP email:', err);
     if (process.env.NODE_ENV !== 'production') {
       console.log('====================================================');
       console.log(`🔑 [OTP FALLBACK] Password reset OTP for ${email}: ${otp}`);
@@ -166,6 +194,9 @@ const issuePasswordResetOtp = async (user: { id: string; email: string; name: st
       expiresAt,
     },
   });
+
+  // A freshly issued code resets the consecutive-failure budget.
+  clearOtpFailures(user.email);
 
   const sentViaEmail = await sendPasswordResetOtp(user.email, user.name, otp);
   return { otp, sentViaEmail };
@@ -395,8 +426,9 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
     const { email } = req.body;
     const genericSuccess = { message: 'If the account exists, an OTP has been sent.' };
     if (!email) return res.status(400).json({ error: 'Email is required.' });
+    const normalizedEmail = String(email).trim();
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (!user) return res.json(genericSuccess);
 
     const { otp, sentViaEmail } = await issuePasswordResetOtp({ id: user.id, email: user.email, name: user.name });
@@ -404,6 +436,8 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
       message: sentViaEmail
         ? 'An OTP has been sent to your email.'
         : 'An OTP has been generated.',
+      // Dev convenience: expose the code so the frontend can auto-fill it.
+      ...(process.env.NODE_ENV !== 'production' && { devOtp: otp }),
     });
   } catch (error) {
     if ((error as Error).message === 'OTP_RESEND_COOLDOWN') {
@@ -420,8 +454,9 @@ export const resendPasswordResetOtp = async (req: Request, res: Response) => {
     const { email } = req.body;
     const genericSuccess = { message: 'If the account exists, a new OTP has been sent.' };
     if (!email) return res.status(400).json({ error: 'Email is required.' });
+    const normalizedEmail = String(email).trim();
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (!user) return res.json(genericSuccess);
 
     const { otp, sentViaEmail } = await issuePasswordResetOtp({ id: user.id, email: user.email, name: user.name });
@@ -429,6 +464,7 @@ export const resendPasswordResetOtp = async (req: Request, res: Response) => {
       message: sentViaEmail
         ? 'A new OTP has been sent to your email.'
         : 'A new OTP has been generated.',
+      ...(process.env.NODE_ENV !== 'production' && { devOtp: otp }),
     });
   } catch (error) {
     if ((error as Error).message === 'OTP_RESEND_COOLDOWN') {
@@ -444,17 +480,26 @@ export const verifyPasswordResetOtp = async (req: Request, res: Response) => {
   try {
     const { email, otp } = req.body;
     if (!email || !otp) return res.status(400).json({ error: 'Email and OTP are required.' });
+    const normalizedEmail = String(email).trim();
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (!user) {
       return res.status(400).json({ error: 'Invalid or expired OTP.' });
     }
 
     const matchedToken = await findMatchingOtpToken(user.id, String(otp));
     if (!matchedToken) {
-      return res.status(400).json({ error: 'Invalid or expired OTP.' });
+      const invalidated = await registerOtpFailure(normalizedEmail, user.id);
+      return res
+        .status(400)
+        .json({
+          error: invalidated
+            ? 'Too many invalid attempts. Please request a new OTP.'
+            : 'Invalid or expired OTP.',
+        });
     }
 
+    clearOtpFailures(normalizedEmail);
     return res.json({ message: 'OTP verified successfully.' });
   } catch (error) {
     console.error(error);
@@ -477,15 +522,25 @@ export const resetPassword = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const normalizedEmail = String(email).trim();
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (!user) {
       return res.status(400).json({ error: 'Invalid or expired OTP.' });
     }
 
     const matchedToken = await findMatchingOtpToken(user.id, String(otp));
     if (!matchedToken) {
-      return res.status(400).json({ error: 'Invalid or expired OTP.' });
+      const invalidated = await registerOtpFailure(normalizedEmail, user.id);
+      return res
+        .status(400)
+        .json({
+          error: invalidated
+            ? 'Too many invalid attempts. Please request a new OTP.'
+            : 'Invalid or expired OTP.',
+        });
     }
+
+    clearOtpFailures(normalizedEmail);
 
     const passwordHash = await bcrypt.hash(newPassword, 10);
     await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });

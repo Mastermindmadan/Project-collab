@@ -6,6 +6,7 @@ import api from '../utils/api';
 export default function ForgotPassword() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
+  const [devOtp, setDevOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
@@ -18,9 +19,11 @@ export default function ForgotPassword() {
     setLoading(true);
     setError('');
     try {
-      await api.post('/auth/request-password-reset', { email });
+      const res = await api.post('/auth/request-password-reset', { email });
 
       try { sessionStorage.setItem('pcai-reset-email', email); } catch { /* ignore */ }
+      // Dev convenience: the backend exposes devOtp only when NODE_ENV !== production.
+      setDevOtp(res.data?.devOtp || '');
       setSent(true);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to send reset email. Please try again.');
@@ -30,7 +33,7 @@ export default function ForgotPassword() {
   };
 
   const goToOtp = () => {
-    navigate('/otp-verification', { state: { email } });
+    navigate('/otp-verification', { state: { email, ...(devOtp ? { devOtp } : {}) } });
   };
 
   return (
