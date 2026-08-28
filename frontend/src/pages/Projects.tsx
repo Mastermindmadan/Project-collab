@@ -382,7 +382,7 @@ export default function Projects() {
 
         const res = await api.post('/upload', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
-          timeout: 120000,
+          timeout: 600000,
         });
         newDoc = res.data?.document;
       } else if (docUploadMode === 'url' && docName && docUrl) {

@@ -216,6 +216,10 @@ router.delete('/folders/:id', async (req: Request, res: Response) => {
 
 // POST /api/drive/:projectId/files — upload file to drive (Cloudinary primary, local fallback)
 router.post('/:projectId/files', handleDriveUploadSingle('file'), async (req: Request, res: Response) => {
+  // Extend timeout for large uploads (up to 10 minutes)
+  req.setTimeout(600000);
+  res.setTimeout(600000);
+
   try {
     const authReq = req as AuthenticatedRequest;
     if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
@@ -275,6 +279,48 @@ router.post('/:projectId/files', handleDriveUploadSingle('file'), async (req: Re
     if (req.file && fs.existsSync(req.file.path)) {
       try { fs.unlinkSync(req.file.path); } catch (_) {}
     }
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// PATCH /api/drive/files/:id/move — move file to a folder or to root (folderId: null)
+router.patch('/files/:id/move', async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { id } = req.params;
+    const { folderId } = req.body;
+
+    const file = await prisma.driveFile.findUnique({ where: { id } });
+    if (!file) return res.status(404).json({ success: false, message: 'File not found' });
+
+    const proj = await prisma.project.findUnique({
+      where: { id: file.projectId },
+      select: { teamId: true },
+    });
+    if (proj) {
+      const membership = await prisma.teamMember.findUnique({
+        where: { userId_teamId: { userId: authReq.user.id, teamId: proj.teamId } },
+      });
+      if (!membership) return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    if (folderId) {
+      const targetFolder = await prisma.driveFolder.findUnique({ where: { id: String(folderId) } });
+      if (!targetFolder || targetFolder.projectId !== file.projectId) {
+        return res.status(400).json({ success: false, message: 'Target folder not found in this project' });
+      }
+    }
+
+    const updated = await prisma.driveFile.update({
+      where: { id },
+      data: { folderId: folderId ? String(folderId) : null },
+      include: { uploadedBy: { select: { name: true, avatarUrl: true } }, folder: { select: { name: true } } },
+    });
+
+    res.json({ success: true, file: updated });
+  } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
 });

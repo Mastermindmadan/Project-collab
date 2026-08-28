@@ -90,14 +90,12 @@ export default function Dashboard() {
         });
         totalProjects = projectEntries.length;
 
-        // Project details are independent, so load all of them concurrently. A failed
-        // project is omitted while successful projects still populate the dashboard.
-        const firstProjectId = projectEntries[0]?.project.id;
-        const [projectResults, activityResult] = await Promise.all([
+        // Project details and activity logs are independent, so load them concurrently.
+        const [projectResults, activityResults] = await Promise.all([
           Promise.allSettled(projectEntries.map(({ project }: any) => api.get(`/projects/${project.id}/summary`))),
-          firstProjectId
-            ? api.get(`/misc/projects/${firstProjectId}/activities`).catch(() => null)
-            : Promise.resolve(null)
+          Promise.allSettled(
+            projectEntries.slice(0, 5).map(({ project }: any) => api.get(`/misc/projects/${project.id}/activities`))
+          )
         ]);
 
         projectResults.forEach((result) => {
@@ -120,9 +118,17 @@ export default function Dashboard() {
           });
         });
 
-        if (activityResult) {
-          const logs = activityResult.data.logs || [];
-          logs.slice(0, 5).forEach((log: any) => {
+        const rawLogs: any[] = [];
+        activityResults.forEach((res) => {
+          if (res.status === 'fulfilled' && res.value.data?.logs) {
+            rawLogs.push(...res.value.data.logs);
+          }
+        });
+
+        rawLogs
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .slice(0, 6)
+          .forEach((log: any) => {
             allActivity.push({
               user: log.user?.name || 'Someone',
               action: log.action.replace(/_/g, ' ').toLowerCase(),
@@ -130,7 +136,6 @@ export default function Dashboard() {
               time: new Date(log.createdAt).toLocaleDateString(),
             });
           });
-        }
 
         // Sort deadlines ascending
         allDeadlines.sort((a, b) => a.due - b.due);

@@ -11,12 +11,58 @@ export const getNotifications = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const notifications = await prisma.notification.findMany({
-      where: { userId: authReq.user.id },
-      orderBy: { createdAt: 'desc' }
+    const unreadOnly = req.query.unread === 'true' || req.query.unread === '1';
+    const where: any = { userId: authReq.user.id };
+    if (unreadOnly) {
+      where.isRead = false;
+    }
+
+    const [notifications, unreadCount] = await Promise.all([
+      prisma.notification.findMany({
+        where,
+        orderBy: { createdAt: 'desc' }
+      }),
+      prisma.notification.count({
+        where: { userId: authReq.user.id, isRead: false }
+      })
+    ]);
+
+    res.json({ notifications, unreadCount });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
+export const markNotificationsRead = async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { notificationIds, all } = req.body || {};
+
+    if (all || !notificationIds || !Array.isArray(notificationIds) || notificationIds.length === 0) {
+      await prisma.notification.updateMany({
+        where: { userId: authReq.user.id, isRead: false },
+        data: { isRead: true }
+      });
+    } else {
+      await prisma.notification.updateMany({
+        where: {
+          id: { in: notificationIds },
+          userId: authReq.user.id
+        },
+        data: { isRead: true }
+      });
+    }
+
+    const unreadCount = await prisma.notification.count({
+      where: { userId: authReq.user.id, isRead: false }
     });
 
-    res.json({ notifications });
+    res.json({ message: 'Notifications marked as read', unreadCount });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal Server Error' });

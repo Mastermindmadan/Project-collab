@@ -7,6 +7,9 @@ import { syncGitHub, getActivityFeed, downloadGitHubReport } from '../controller
 
 const router = Router();
 
+// All github routes require authentication
+router.use(authenticateJWT);
+
 // GET /api/github/health - Health check endpoint for GitHub Intelligence service
 router.get('/health', (_req, res) => {
   return res.json({
@@ -14,8 +17,6 @@ router.get('/health', (_req, res) => {
     message: 'GitHub Intelligence service operational'
   });
 });
-
-router.use(authenticateJWT);
 
 // 1. GITHUB INTELLIGENCE HUB API (Combines GitHub REST API + Gemini AI Insights)
 router.get('/intelligence', geminiRateLimiter, async (req, res) => {

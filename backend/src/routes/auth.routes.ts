@@ -5,7 +5,7 @@ import { authRateLimiter, otpRequestRateLimiter } from '../middlewares/rateLimit
 
 const router = Router();
 
-router.post('/register', register);
+router.post('/register', authRateLimiter, register);
 router.post('/login', authRateLimiter, login);
 router.post('/logout', logout);
 router.post('/refresh-token', refreshToken);

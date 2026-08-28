@@ -9,12 +9,14 @@ import { geminiRateLimiter } from '../middlewares/rateLimit.middleware';
 
 const router = Router();
 
+// All AI routes require authentication
+router.use(authenticateJWT);
+
 // GET /api/ai/health - Health check endpoint for multi-provider AI Router & failover diagnostics
 router.get('/health', async (_req, res) => {
   const report = await AIRouterService.getHealthReport();
   return res.json(report);
 });
-
 
 // GET /api/ai/status - Lightweight Gemini connectivity probe for the UI status indicator
 router.get('/status', async (_req, res) => {
@@ -42,8 +44,6 @@ router.get('/status', async (_req, res) => {
     return res.json({ status: 'unavailable', latencyMs: Date.now() - startedAt });
   }
 });
-
-router.use(authenticateJWT);
 
 // GET /api/ai/usage - Returns user daily usage and quotas
 router.get('/usage', async (req, res) => {

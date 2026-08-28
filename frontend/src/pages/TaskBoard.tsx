@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import api from '../utils/api';
 import {
   CheckSquare, Plus, Search, Filter, Clock, User,
-  MoreVertical, Loader2, X, MessageSquare, Send, Trash2, ShieldAlert, CheckCircle
+  MoreVertical, Loader2, X, MessageSquare, Send, Trash2, ShieldAlert, CheckCircle, AlertCircle
 } from 'lucide-react';
 
 type Priority = 'LOW' | 'MEDIUM' | 'HIGH';
@@ -410,7 +410,11 @@ export default function TaskBoard() {
               : 'bg-red-950/90 border-red-500/30 text-red-300'
           }`}
         >
-          <CheckCircle className="w-4 h-4 flex-shrink-0" />
+          {toast.type === 'success' ? (
+            <CheckCircle className="w-4 h-4 flex-shrink-0" />
+          ) : (
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          )}
           {toast.message}
           <button onClick={() => setToast(null)} className="ml-2 opacity-60 hover:opacity-100"><X className="w-3.5 h-3.5" /></button>
         </div>

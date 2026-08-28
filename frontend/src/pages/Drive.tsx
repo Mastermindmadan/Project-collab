@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { HardDrive, FolderOpen, FolderPlus, Upload, Download, Trash2, Search, File, FileText, Image, Archive, ChevronRight, Loader2, X } from 'lucide-react';
+import { HardDrive, FolderOpen, FolderPlus, Upload, Download, Trash2, Search, File, FileText, Image, Archive, ChevronRight, Loader2, X, FolderInput } from 'lucide-react';
 import api from '../utils/api';
 import { useAuthStore } from '../store/auth.store';
 import { toast } from 'sonner';
@@ -104,6 +104,34 @@ export default function Drive() {
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to delete file. Please try again.');
     } finally {
+      loadDrive(selectedProject, currentFolderId);
+    }
+  };
+
+  const [movingFile, setMovingFile] = useState<DriveFile | null>(null);
+  const [availableFolders, setAvailableFolders] = useState<Folder[]>([]);
+
+  const loadAllFolders = async (projectId: string) => {
+    if (!projectId) return;
+    try {
+      const res = await api.get(`/drive/${projectId}`);
+      setAvailableFolders(res.data.folders || []);
+    } catch {}
+  };
+
+  const moveFile = async (fileId: string, targetFolderId: string | null) => {
+    // Immediate optimistic update
+    if (targetFolderId !== currentFolderId) {
+      setFiles(prev => prev.filter(f => f.id !== fileId));
+      setSearchResults(prev => prev ? prev.filter(f => f.id !== fileId) : null);
+    }
+    try {
+      await api.patch(`/drive/files/${fileId}/move`, { folderId: targetFolderId });
+      toast.success(targetFolderId ? 'File moved to folder successfully.' : 'File moved to root successfully.');
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to move file.');
+    } finally {
+      setMovingFile(null);
       loadDrive(selectedProject, currentFolderId);
     }
   };
@@ -257,6 +285,7 @@ export default function Drive() {
             projectId={selectedProject}
             uploadedById={user.id}
             driveMode={true}
+            folderId={currentFolderId || undefined}
             onUploaded={(doc) => {
               if (doc) {
                 setFiles(prev => [doc, ...prev]);
@@ -343,6 +372,9 @@ export default function Drive() {
                       </button>
                       <button onClick={() => downloadFile(f)} title="Download" className="p-1.5 hover:bg-secondary rounded-lg transition-colors">
                         <Download className="w-4 h-4 text-primary" />
+                      </button>
+                      <button onClick={() => { setMovingFile(f); loadAllFolders(selectedProject); }} title="Move to Folder" className="p-1.5 hover:bg-amber-500/10 rounded-lg transition-colors">
+                        <FolderInput className="w-4 h-4 text-amber-500" />
                       </button>
                       <button onClick={() => deleteFile(f.id)} title="Delete" className="p-1.5 hover:bg-destructive/10 rounded-lg transition-colors">
                         <Trash2 className="w-4 h-4 text-destructive" />
@@ -439,6 +471,48 @@ export default function Drive() {
                   )}
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {movingFile && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="glass-panel border border-border rounded-2xl w-full max-w-md p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                <FolderInput className="w-4 h-4 text-amber-500" /> Move "{movingFile.name}"
+              </h3>
+              <button onClick={() => setMovingFile(null)} className="p-1 rounded-lg hover:bg-secondary text-muted-foreground">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground">Select destination folder:</p>
+            <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+              <button
+                onClick={() => moveFile(movingFile.id, null)}
+                className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
+                  !movingFile.folderId ? 'bg-primary/20 text-primary border border-primary/40' : 'glass-card hover:bg-secondary text-foreground'
+                }`}
+              >
+                <HardDrive className="w-3.5 h-3.5" /> Root Folder
+              </button>
+              {availableFolders.map(folder => (
+                <button
+                  key={folder.id}
+                  onClick={() => moveFile(movingFile.id, folder.id)}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
+                    movingFile.folderId === folder.id ? 'bg-primary/20 text-primary border border-primary/40' : 'glass-card hover:bg-secondary text-foreground'
+                  }`}
+                >
+                  <FolderOpen className="w-3.5 h-3.5 text-amber-500" /> {folder.name}
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-end pt-2">
+              <button onClick={() => setMovingFile(null)} className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground">
+                Cancel
+              </button>
             </div>
           </div>
         </div>

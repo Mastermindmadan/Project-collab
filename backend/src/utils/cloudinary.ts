@@ -135,10 +135,13 @@ export async function uploadLocalFileToCloudinary(
     resource_type: resourceType,
     use_filename: true,
     unique_filename: true,
+    chunk_size: 6 * 1024 * 1024, // 6MB chunks for large files (>20MB like 26MB)
+    timeout: 600000, // 10 minute timeout
   };
 
   try {
-    const result: UploadApiResponse = await cloudinary.uploader.upload(filePath, uploadOptions);
+    // upload_large supports chunked uploads for files > 20MB while working seamlessly for small files
+    const result = (await cloudinary.uploader.upload_large(filePath, uploadOptions)) as UploadApiResponse;
 
     // Unlink local temp file after successful upload
     if (fs.existsSync(filePath)) {

@@ -685,21 +685,50 @@ export default function GitHubIntegration() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {aiInsights.summary && (
+              {(aiInsights.velocitySummary || aiInsights.summary) && (
                 <div className="glass-card rounded-xl p-5 space-y-2">
                   <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-primary" /> AI Summary
+                    <Sparkles className="w-4 h-4 text-primary" /> Velocity &amp; Architecture Summary
                   </h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{aiInsights.summary}</p>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {aiInsights.velocitySummary || aiInsights.summary}
+                  </p>
                 </div>
               )}
-              {aiInsights.risks && aiInsights.risks.length > 0 && (
+
+              {aiInsights.contributorDistributionSummary && (
                 <div className="glass-card rounded-xl p-5 space-y-2">
-                  <h3 className="text-sm font-bold text-rose-400 flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4" /> Identified Risks
+                  <h3 className="text-sm font-bold text-amber-400 flex items-center gap-2">
+                    <Users className="w-4 h-4" /> Contributor Dynamics
+                  </h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {aiInsights.contributorDistributionSummary}
+                  </p>
+                </div>
+              )}
+
+              {((aiInsights.codebaseStrengths && aiInsights.codebaseStrengths.length > 0) || (aiInsights.strengths && aiInsights.strengths.length > 0)) && (
+                <div className="glass-card rounded-xl p-5 space-y-2">
+                  <h3 className="text-sm font-bold text-emerald-400 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4" /> Codebase Strengths
                   </h3>
                   <ul className="space-y-1.5">
-                    {aiInsights.risks.map((r: string, i: number) => (
+                    {(aiInsights.codebaseStrengths || aiInsights.strengths || []).map((s: string, i: number) => (
+                      <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
+                        <span className="text-emerald-400 mt-0.5">✓</span> {s}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {((aiInsights.potentialBottlenecks && aiInsights.potentialBottlenecks.length > 0) || (aiInsights.risks && aiInsights.risks.length > 0)) && (
+                <div className="glass-card rounded-xl p-5 space-y-2">
+                  <h3 className="text-sm font-bold text-rose-400 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4" /> Identified Bottlenecks &amp; Risks
+                  </h3>
+                  <ul className="space-y-1.5">
+                    {(aiInsights.potentialBottlenecks || aiInsights.risks || []).map((r: string, i: number) => (
                       <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
                         <span className="text-rose-400 mt-0.5">•</span> {r}
                       </li>
@@ -707,15 +736,16 @@ export default function GitHubIntegration() {
                   </ul>
                 </div>
               )}
-              {aiInsights.recommendations && aiInsights.recommendations.length > 0 && (
+
+              {((aiInsights.actionableRecommendations && aiInsights.actionableRecommendations.length > 0) || (aiInsights.recommendations && aiInsights.recommendations.length > 0)) && (
                 <div className="glass-card rounded-xl p-5 space-y-2 md:col-span-2">
-                  <h3 className="text-sm font-bold text-emerald-400 flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4" /> Recommendations
+                  <h3 className="text-sm font-bold text-primary flex items-center gap-2">
+                    <Sparkles className="w-4 h-4" /> Actionable Engineering Recommendations
                   </h3>
-                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                    {aiInsights.recommendations.map((rec: string, i: number) => (
-                      <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
-                        <span className="text-emerald-400 mt-0.5">✓</span> {rec}
+                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {(aiInsights.actionableRecommendations || aiInsights.recommendations || []).map((rec: string, i: number) => (
+                      <li key={i} className="text-sm text-muted-foreground flex items-start gap-2 p-2.5 rounded-lg bg-primary/5 border border-primary/10">
+                        <span className="text-primary font-bold">→</span> {rec}
                       </li>
                     ))}
                   </ul>

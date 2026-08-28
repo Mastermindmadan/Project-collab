@@ -26,6 +26,12 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
   const [aiStatus, setAiStatus] = useState<'online' | 'slow' | 'unavailable'>('unavailable');
   const [activeProvider, setActiveProvider] = useState<'gemini' | 'groq' | 'openai'>('gemini');
   const [notifs, setNotifs] = useState<any[]>([]);
+  const [catchUpPopup, setCatchUpPopup] = useState<{
+    visible: boolean;
+    count: number;
+    latestTitle?: string;
+    latestMessage?: string;
+  } | null>(null);
   // ── AI usage/quota telemetry for the provider badge hover tooltip ───────────
   const [aiUsage, setAiUsage] = useState<Record<string, { used: number; limit: number }>>({});
   const [aiHealthDetail, setAiHealthDetail] = useState<any>(null);
@@ -58,16 +64,50 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       .catch(() => { /* non-critical, ignore */ });
   }, [accessToken, activeUserId]);
 
-  // Fetch real notifications and listen for real-time push socket events
+  // 1. Pure REST catch-up sync on app mount (unaffected by socket state or backend sleep)
   useEffect(() => {
     let mounted = true;
-    api.get('/misc/notifications')
-      .then(res => {
-        if (mounted) setNotifs(res.data.notifications || []);
-      })
-      .catch(err => console.error('Failed to load notifications:', err));
-
     if (!accessToken) return;
+
+    const performCatchUp = async () => {
+      try {
+        const res = await api.get('/notifications', { params: { unread: true } });
+        const unreadList = res.data.notifications || [];
+        const count = res.data.unreadCount ?? unreadList.length;
+
+        if (mounted) {
+          // Fetch full list to populate dropdown
+          const allRes = await api.get('/notifications');
+          const allNotifications = allRes.data.notifications || [];
+          setNotifs(allNotifications);
+
+          // If there are unread notifications while the user was away, show catch-up popup!
+          if (count > 0 && unreadList.length > 0) {
+            const latest = unreadList[0];
+            setCatchUpPopup({
+              visible: true,
+              count,
+              latestTitle: latest.title,
+              latestMessage: latest.message,
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Initial notifications catch-up error:', err);
+      }
+    };
+
+    performCatchUp();
+
+    return () => {
+      mounted = false;
+    };
+  }, [accessToken, activeUserId]);
+
+  // 2. Separate WebSocket listener for real-time live events while the app is active
+  useEffect(() => {
+    if (!accessToken) return;
+    let mounted = true;
 
     const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '');
     if (!apiBase) return;
@@ -75,8 +115,6 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
     const socket = io(WS_URL, {
       auth: { token: accessToken },
       transports: ['websocket', 'polling'],
-      // Bounded reconnect with exponential backoff: prevents an endless
-      // reconnect loop from hammering the Render backend with 429s.
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
@@ -87,6 +125,12 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
     socket.on('notification:new', (newNotif: any) => {
       if (mounted) {
         setNotifs(prev => [newNotif, ...prev]);
+        setCatchUpPopup({
+          visible: true,
+          count: 1,
+          latestTitle: newNotif.title,
+          latestMessage: newNotif.message,
+        });
       }
     });
 
@@ -95,6 +139,27 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       socket.disconnect();
     };
   }, [accessToken]);
+
+  const handleToggleNotifMenu = async () => {
+    const nextState = !showNotifMenu;
+    setShowNotifMenu(nextState);
+
+    if (nextState) {
+      // Dismiss popup if user opens menu
+      setCatchUpPopup(null);
+
+      const unreadIds = notifs.filter(n => !n.isRead).map(n => n.id);
+      if (unreadIds.length > 0) {
+        // Optimistic local update
+        setNotifs(prev => prev.map(n => ({ ...n, isRead: true })));
+        try {
+          await api.patch('/notifications/mark-read', { notificationIds: unreadIds });
+        } catch (err) {
+          console.error('Failed to mark notifications read:', err);
+        }
+      }
+    }
+  };
 
   const unreadCount = notifs.filter(n => !n.isRead).length;
 
@@ -475,26 +540,47 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
             {/* Notifications */}
             <div className="relative">
 
-              <button onClick={() => setShowNotifMenu(!showNotifMenu)}
-                className="p-2 rounded-xl hover:bg-secondary border border-transparent hover:border-border text-muted-foreground hover:text-foreground transition-all relative">
+              <button
+                onClick={handleToggleNotifMenu}
+                aria-label="View notifications"
+                className="p-2 rounded-xl hover:bg-secondary border border-transparent hover:border-border text-muted-foreground hover:text-foreground transition-all relative"
+              >
                 <Bell className="w-4 h-4" />
-                {notifs.filter(n => !n.isRead).length > 0 && (
+                {unreadCount > 0 && (
                   <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-primary glow-primary animate-pulse" />
                 )}
               </button>
               {showNotifMenu && (
-                <div className="absolute right-0 mt-2 w-72 glass-panel border border-border rounded-xl shadow-2xl p-4 z-50 text-xs">
-                  <h3 className="font-bold text-foreground mb-3">Notifications</h3>
-                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                <div className="absolute right-0 mt-2 w-80 glass-panel border border-border rounded-xl shadow-2xl p-4 z-50 text-xs">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-bold text-foreground">Notifications</h3>
+                    <span className="text-[10px] text-muted-foreground font-semibold">
+                      {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'}
+                    </span>
+                  </div>
+                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                     {notifs.map(n => (
-                      <div key={n.id} className="p-2.5 bg-secondary/50 rounded-xl border border-border">
-                        <p className="font-semibold text-foreground">{n.title}</p>
-                        <p className="text-muted-foreground mt-0.5">{n.message}</p>
+                      <div key={n.id} className={`p-2.5 rounded-xl border transition-colors ${n.isRead ? 'bg-secondary/30 border-border/60 opacity-80' : 'bg-primary/5 border-primary/20'}`}>
+                        <div className="flex items-center justify-between">
+                          <p className="font-semibold text-foreground truncate">{n.title}</p>
+                          {!n.isRead && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
+                          )}
+                        </div>
+                        <p className="text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">{n.message}</p>
+                        <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono">
+                          {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </p>
                       </div>
                     ))}
+                    {notifs.length === 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-4">No notifications yet.</p>
+                    )}
                   </div>
                   <Link to="/notifications" onClick={() => setShowNotifMenu(false)}
-                    className="block mt-3 text-center text-primary hover:underline text-xs">View all notifications →</Link>
+                    className="block mt-3 text-center text-primary hover:underline text-xs font-semibold">
+                    View all notifications →
+                  </Link>
                 </div>
               )}
             </div>
@@ -503,6 +589,53 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
             <AccountSwitcher onAddAccount={() => setShowAddAccount(true)} />
           </div>
         </header>
+
+        {/* Floating Catch-Up Notification Popup upon Website Open */}
+        {catchUpPopup?.visible && (
+          <div className="fixed bottom-6 right-6 z-[100] max-w-sm w-[calc(100vw-3rem)] sm:w-96 bg-slate-950/95 border border-primary/40 rounded-2xl shadow-2xl p-4 backdrop-blur-xl animate-in fade-in slide-in-from-bottom-5 duration-300">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20 text-primary flex-shrink-0 mt-0.5">
+                  <Bell className="w-5 h-5 animate-bounce" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-primary">
+                      {catchUpPopup.count > 1 ? `${catchUpPopup.count} New Updates` : 'New Notification'}
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-semibold">While away</span>
+                  </div>
+                  <p className="text-sm font-semibold text-foreground mt-1 truncate">
+                    {catchUpPopup.latestTitle || 'New activity in your projects'}
+                  </p>
+                  {catchUpPopup.latestMessage && (
+                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">
+                      {catchUpPopup.latestMessage}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => setCatchUpPopup(null)}
+                className="text-muted-foreground hover:text-foreground p-1 rounded-lg hover:bg-secondary transition-colors"
+                aria-label="Dismiss notification popup"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex items-center justify-end gap-2 mt-3 pt-2.5 border-t border-border/50">
+              <button
+                onClick={() => {
+                  setCatchUpPopup(null);
+                  handleToggleNotifMenu();
+                }}
+                className="px-3 py-1.5 text-xs font-bold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-all flex items-center gap-1.5 shadow-sm"
+              >
+                View Updates <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Page Content */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-x-hidden">

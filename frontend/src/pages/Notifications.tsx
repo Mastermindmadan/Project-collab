@@ -93,7 +93,7 @@ export default function Notifications() {
     if (notifications.find(n => n.id === id)?.isRead) return;
     try {
       setActionLoading(id);
-      await api.put(`/misc/notifications/${id}/read`);
+      await api.patch('/notifications/mark-read', { notificationIds: [id] });
       setNotifications((ns) => ns.map((n) => n.id === id ? { ...n, isRead: true } : n));
     } catch (err) {
       console.error('Failed to mark notification as read', err);
@@ -104,10 +104,8 @@ export default function Notifications() {
 
   const markAllRead = async () => {
     try {
-      // Mark all unread ones
-      const unread = notifications.filter(n => !n.isRead);
-      await Promise.all(unread.map(n => api.put(`/misc/notifications/${n.id}/read`)));
       setNotifications((ns) => ns.map((n) => ({ ...n, isRead: true })));
+      await api.patch('/notifications/mark-read', { all: true });
     } catch (err) {
       console.error('Failed to mark all as read', err);
     }

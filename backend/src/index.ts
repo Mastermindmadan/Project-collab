@@ -61,6 +61,7 @@ import chatRoutes from './routes/chat.routes';
 
 import filesRoutes from './routes/files.routes';
 import aipmRoutes from './routes/aipm.routes';
+import emailRoutes from './routes/email.routes';
 
 
 // Import Socket helper
@@ -135,7 +136,6 @@ app.get('/api/health', (_req, res) => {
 
 // Setup API routers
 app.use('/api/auth', authRoutes);
-import emailRoutes from './routes/email.routes';
 app.use('/api/email', emailRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/api/projects', projectRoutes);
@@ -149,8 +149,8 @@ app.use('/api/drive', driveRoutes);
 app.use('/api/files', filesRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/chat', chatRoutes);
-app.use('/api', miscRoutes);
 app.use('/api/misc', miscRoutes);
+app.use('/api', miscRoutes);
 app.use('/api/ai-pm', aipmRoutes);
 
 

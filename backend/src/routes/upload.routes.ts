@@ -73,6 +73,10 @@ function getFileType(mimetype: string): string {
 
   // POST /api/upload — Upload a file (Cloudinary primary, local disk fallback)
 router.post('/', handleUploadSingle('file'), async (req: Request, res: Response) => {
+  // Extend timeout for large uploads (up to 10 minutes)
+  req.setTimeout(600000);
+  res.setTimeout(600000);
+
   try {
     const authReq = req as AuthenticatedRequest;
     if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });

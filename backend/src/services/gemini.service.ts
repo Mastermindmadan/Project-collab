@@ -11,14 +11,13 @@ export class GeminiService {
     fallbackGenerator: () => T,
     allowFallback: boolean = true
   ): Promise<T> {
-    const configuredModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+    const configuredModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
     const candidateModels = Array.from(new Set([
       configuredModel,
-      'gemini-3.6-flash',
-      'gemini-3.5-flash',
-      'gemini-3.1-flash-lite',
+      'gemini-2.0-flash',
       'gemini-2.5-flash',
-      'gemini-2.0-flash'
+      'gemini-1.5-flash',
+      'gemini-1.5-pro'
     ]));
 
     // Maximum attempts equal to number of configured keys (or 1 if none)

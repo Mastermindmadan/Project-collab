@@ -381,10 +381,10 @@ export const updateMilestone = async (req: Request, res: Response) => {
     const updated = await prisma.milestone.update({
       where: { id: milestoneId },
       data: {
-        title: title || milestone.title,
+        title: title !== undefined ? title : milestone.title,
         description: description !== undefined ? description : milestone.description,
         dueDate: dueDate ? new Date(dueDate) : milestone.dueDate,
-        status: status || milestone.status
+        status: status !== undefined ? status : milestone.status
       }
     });
 
