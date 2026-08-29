@@ -98,9 +98,26 @@ export function streamRemoteUrl(
         }
         settled = true;
 
-        const contentType = String(
+        let contentType = String(
           upstream.headers['content-type'] || options.mimeType || 'application/octet-stream'
         );
+
+        // Cloudinary serves `raw` uploads (PDFs, Office docs, ZIPs, …) with a generic
+        // `application/octet-stream` Content-Type and a filename WITHOUT its extension.
+        // Passing that through makes the browser refuse to render PDFs inline and can
+        // make downloads open as an unknown file type. Whenever the upstream only
+        // reports the generic octet-stream, fall back to the real MIME type resolved
+        // from the stored DB value / file extension (options.mimeType) so previews
+        // render and downloads get the correct type + filename.
+        if (
+          !contentType ||
+          contentType === 'application/octet-stream' ||
+          contentType.startsWith('application/octet-stream')
+        ) {
+          if (options.mimeType && options.mimeType !== 'application/octet-stream') {
+            contentType = options.mimeType;
+          }
+        }
 
         res.status(status);
         res.setHeader('Content-Type', contentType);
