@@ -324,6 +324,17 @@ export const generateQRCodeInvite = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Team not found.' });
     }
 
+    // The invite code + QR are meant to be shared only with people already inside
+    // the team (so they can invite their classmates/colleagues). Returning it to
+    // ANY authenticated user would leak every team's join code to everyone in the
+    // app. Verify the caller is a member before issuing the invite.
+    const membership = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId } },
+    });
+    if (!membership) {
+      return res.status(403).json({ error: 'Access denied. You must be a team member to view the invite.' });
+    }
+
     const qrData = JSON.stringify({
       type: 'team-invite',
       teamId: team.id,

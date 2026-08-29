@@ -140,8 +140,33 @@ export async function uploadLocalFileToCloudinary(
   };
 
   try {
-    // upload_large supports chunked uploads for files > 20MB while working seamlessly for small files
-    const result = (await cloudinary.uploader.upload_large(filePath, uploadOptions)) as UploadApiResponse;
+    // upload_large supports chunked uploads for files > 20MB while working seamlessly
+    // for small files. IMPORTANT: unlike `upload`, the v2 SDK's `upload_large` returns a
+    // Chunkable Writable STREAM object here (NOT a promise/response) — `await`ing it
+    // yields the stream itself, whose `secure_url` is undefined. That made `fileUrl`
+    // undefined at the Prisma create. We therefore drive the upload through its
+    // Node-style callback, which the SDK invokes exactly once with the final
+    // (error, result) when the last chunk completes, and resolve/reject from that.
+    const result: UploadApiResponse = await new Promise((resolve, reject) => {
+      cloudinary.uploader.upload_large(
+        filePath,
+        uploadOptions,
+        (error?: any, res?: UploadApiResponse) => {
+          if (error) return reject(error);
+          if (!res) return reject(new Error('Cloudinary upload_large returned no response object'));
+          resolve(res);
+        }
+      );
+    });
+
+    // Diagnostic logging of the actual returned response, confirming which field holds
+    // the final delivery URL. Never logs the API secret.
+    console.log('[Cloudinary] upload_large succeeded. Response URL fields present:', {
+      secure_url: !!result.secure_url,
+      url: !!result.url,
+      public_id: !!result.public_id,
+      bytes: result.bytes,
+    });
 
     // Unlink local temp file after successful upload
     if (fs.existsSync(filePath)) {
@@ -152,8 +177,15 @@ export async function uploadLocalFileToCloudinary(
       }
     }
 
+    // secure_url is the canonical HTTPS delivery URL for signed uploads. Fall back to
+    // `url` only as a safety net — never silently pass undefined downstream.
+    const fileUrl = result.secure_url || result.url;
+    if (!fileUrl) {
+      throw new Error('Cloudinary upload completed but no file URL (secure_url/url) was returned');
+    }
+
     return {
-      url: result.secure_url,
+      url: fileUrl,
       publicId: result.public_id,
       bytes: result.bytes,
     };
