@@ -11,6 +11,7 @@ import {
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell
 } from 'recharts';
+import DeploymentIntelligence from '../components/DeploymentIntelligence';
 
 interface Project {
   id: string;
@@ -1277,6 +1278,7 @@ export default function Projects() {
                     </div>
                   </div>
                 )}
+                <DeploymentIntelligence projectId={selectedProject.id} />
               </div>
             )}
 
