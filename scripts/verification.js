@@ -59,8 +59,11 @@ async function getAnalytics(accessToken, projectId) {
   return axios.get(`${BACKEND_URL}/api/analytics/${projectId}`, { headers: { Authorization: `Bearer ${accessToken}` } });
 }
 
-async function githubIntelligence(accessToken, owner, repo) {
-  return axios.get(`${BACKEND_URL}/api/github/intelligence/${owner}/${repo}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+async function githubIntelligenceScoped(accessToken, projectId, owner, repo) {
+  return axios.get(`${BACKEND_URL}/api/github/intelligence`, {
+    params: { projectId, path: `${owner}/${repo}` },
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 }
 
 async function rapidFailedLogins(email) {
@@ -165,13 +168,58 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
     report.push('❌ 4️⃣ Chat test error');
   }
 
-  // 5. GitHub Intelligence real data
+  // 5. GitHub Intelligence data isolation between two accounts
   try {
-    const ghRes = await githubIntelligence(tokenA, 'facebook', 'react');
-    const hasStars = typeof ghRes.data.stars === 'number' || ghRes.data.stars === null;
-    const estimatedFlag = ghRes.data.starsEstimated === true || ghRes.data.starsEstimated === false;
-    if (hasStars && estimatedFlag) report.push('✅ 5️⃣ GitHub Intelligence loads real data with proper unavailable labeling');
-    else report.push('❌ 5️⃣ GitHub Intelligence response format issue');
+    // Each fresh account has its own default project.
+    const projectsResA = await axios.get(`${BACKEND_URL}/api/project`, { headers: { Authorization: `Bearer ${tokenA}` } });
+    const projectAId = projectsResA.data[0].id;
+    const projectsResB = await axios.get(`${BACKEND_URL}/api/project`, { headers: { Authorization: `Bearer ${tokenB}` } });
+    const projectBId = projectsResB.data[0].id;
+
+    // Connect a DIFFERENT public repo to each project so we can prove
+    // each account sees ONLY its own repo data (commits/branches/PRs/
+    // contributors/chart/activity all derive from this scoped repo).
+    const repoA = 'facebook/react';
+    const repoB = 'vuejs/core';
+    await axios.post(`${BACKEND_URL}/api/projects/${projectAId}/repositories`, { fullPath: repoA }, { headers: { Authorization: `Bearer ${tokenA}` } });
+    await axios.post(`${BACKEND_URL}/api/projects/${projectBId}/repositories`, { fullPath: repoB }, { headers: { Authorization: `Bearer ${tokenB}` } });
+
+    const ghA = await githubIntelligenceScoped(tokenA, projectAId, 'facebook', 'react');
+    const ghB = await githubIntelligenceScoped(tokenB, projectBId, 'vuejs', 'core');
+
+    const aRepo = (ghA.data?.connectedRepo || '').toLowerCase();
+    const bRepo = (ghB.data?.connectedRepo || '').toLowerCase();
+
+    // Cross-account queries must be rejected (B requesting A's project → 400/403/404).
+    let crossBlocked = false;
+    try {
+      await githubIntelligenceScoped(tokenB, projectAId, 'facebook', 'react');
+    } catch (e) {
+      crossBlocked = e.response?.status === 400 || e.response?.status === 403 || e.response?.status === 404;
+    }
+
+    // Requesting a foreign repo under your own project must be rejected too.
+    let foreignRepoBlocked = false;
+    try {
+      await githubIntelligenceScoped(tokenA, projectAId, 'vuejs', 'core');
+    } catch (e) {
+      foreignRepoBlocked = e.response?.status === 400 || e.response?.status === 403;
+    }
+
+    const hasRepoInfo = ghA.data?.repoInfo != null && ghB.data?.repoInfo != null;
+    if (
+      hasRepoInfo &&
+      aRepo.includes('facebook/react') &&
+      bRepo.includes('vuejs/core') &&
+      !aRepo.includes('vuejs/core') &&
+      !bRepo.includes('facebook/react') &&
+      crossBlocked &&
+      foreignRepoBlocked
+    ) {
+      report.push('✅ 5️⃣ GitHub Intelligence is scoped per project/account — no cross-account bleed');
+    } else {
+      report.push('❌ 5️⃣ GitHub Intelligence isolation/format check failed');
+    }
   } catch (e) {
     report.push('❌ 5️⃣ GitHub Intelligence request failed');
   }

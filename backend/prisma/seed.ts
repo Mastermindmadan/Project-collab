@@ -349,8 +349,10 @@ async function main() {
   console.log('  ✅ Created 7 meetings\n');
 
   // ─── Git Analytics ────────────────────────────────────────────────────────────
-  console.log('🔀 Creating Git analytics...');
-  await Promise.all([
+  console.log('🔀 Demo Git analytics seeding is disabled; analytics come from real GitHub syncs.');
+  if (false) { // Demo git analytics intentionally disabled (like demo chat messages); projects begin empty.
+
+    await Promise.all([
     prisma.gitAnalytics.create({
       data: {
         projectId: projPC.id,
@@ -377,7 +379,7 @@ async function main() {
       },
     }),
   ]);
-  console.log('  ✅ Created Git analytics\n');
+  }
 
   // ─── Chat Messages ─────────────────────────────────────────────────────────────
   console.log('💬 Creating team chat messages...');

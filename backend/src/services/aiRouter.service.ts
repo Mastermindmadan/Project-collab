@@ -11,6 +11,7 @@ const db = prisma as any;
 export interface RouterOptions extends GenerateOptions {
   feature?: 'planner' | 'analyzer' | 'risk' | 'aipm' | 'general';
   userId?: string;
+  projectId?: string;
   bypassCache?: boolean;
   ttlSeconds?: number;
 }
@@ -39,13 +40,22 @@ export class AIRouterService {
   };
 
   /**
-   * Generates a deterministic hash for prompt + options to serve as cacheKey
+   * Generates a deterministic hash for prompt + options to serve as cacheKey.
+   *
+   * IMPORTANT (data isolation): the key MUST be scoped with the requesting
+   * userId (and, when provided, the projectId). Unscoped keys can serve one
+   * account's cached AI output to another account that happens to submit the
+   * same prompt. The github service also embeds the repo path in the prompt,
+   * so repo identity is captured via the prompt, but the owning user/project
+   * must still be part of the hash.
    */
   private static generateCacheKey(prompt: string, options?: RouterOptions): string {
     const payload = JSON.stringify({
       prompt: prompt.trim(),
       systemPrompt: options?.systemPrompt,
       feature: options?.feature,
+      userId: options?.userId ?? 'anonymous',
+      projectId: options?.projectId ?? null,
     });
     return crypto.createHash('sha256').update(payload).digest('hex');
   }

@@ -57,6 +57,8 @@ router.get('/usage', async (req, res) => {
 // 1. AI PLANNER API
 router.post('/planner', geminiRateLimiter, async (req, res) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
     const { title, description, objectives, teamSize, deadline } = req.body;
     if (!title) {
       return res.status(400).json({ error: 'Title is required for project planning.' });
@@ -65,7 +67,7 @@ router.post('/planner', geminiRateLimiter, async (req, res) => {
     const mergedObjectives = objectives || (description ? [description] : []);
     const parsedTeamSize = typeof teamSize === 'number' ? teamSize : parseInt(teamSize) || 4;
 
-    const plan = await AIService.planProject(title, mergedObjectives, parsedTeamSize, deadline || '');
+    const plan = await AIService.planProject(title, mergedObjectives, parsedTeamSize, deadline || '', authReq.user.id);
     res.json({ plan });
   } catch (error: any) {
     console.error('AI Planner Route Error:', error.message);
@@ -79,12 +81,14 @@ router.post('/planner', geminiRateLimiter, async (req, res) => {
 // 2. REQUIREMENT ANALYZER API
 router.post('/analyze-docs', geminiRateLimiter, async (req, res) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
     const { documentText } = req.body;
     if (!documentText || documentText.trim() === '') {
       return res.status(400).json({ error: 'Document text or project description is required.' });
     }
 
-    const analysis = await AIService.analyzeRequirements(documentText);
+    const analysis = await AIService.analyzeRequirements(documentText, authReq.user.id);
     res.json({ analysis });
   } catch (error: any) {
     console.error('Requirement Analyzer Route Error:', error.message);
@@ -98,6 +102,8 @@ router.post('/analyze-docs', geminiRateLimiter, async (req, res) => {
 // 3. AI RISK DETECTION ENGINE API
 router.post('/risk-detection', geminiRateLimiter, async (req, res) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
     const { projectName, description, teamSize, deadline } = req.body;
     if (!projectName) {
       return res.status(400).json({ error: 'Project Name is required for risk analysis.' });
@@ -108,7 +114,8 @@ router.post('/risk-detection', geminiRateLimiter, async (req, res) => {
       projectName,
       description || '',
       parsedTeamSize,
-      deadline || ''
+      deadline || '',
+      authReq.user.id
     );
 
     res.json({ riskAnalysis });
@@ -150,12 +157,15 @@ router.get('/projects/:projectId/delay-prediction', async (req, res) => {
 // 5. WEEKLY SPRINT SUMMARY API
 router.post('/sprint-summary', geminiRateLimiter, async (req, res) => {
   try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
     const { completedTasks, pendingTasks, commitStats, blockages } = req.body;
     const summary = await AIService.generateSprintSummary(
       completedTasks || [],
       pendingTasks || [],
       commitStats || 'No commit logs',
-      blockages || []
+      blockages || [],
+      authReq.user.id
     );
     res.json({ summary });
   } catch (error: any) {

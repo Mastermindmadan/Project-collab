@@ -46,7 +46,8 @@ export class AIService {
     title: string,
     objectives: string[],
     teamSize: number,
-    deadline: string
+    deadline: string,
+    userId?: string
   ): Promise<PlannerOutput> {
     const prompt = `
 You are an expert AI software architect and project manager.
@@ -81,13 +82,13 @@ Generate a JSON object matching EXACTLY this TypeScript structure:
     const res = await AIRouterService.generateJSON<PlannerOutput>(
       prompt,
       () => this.generateDynamicPlan(title, objectives, teamSize, deadline),
-      { feature: 'planner' }
+      { feature: 'planner', ...(userId ? { userId } : {}) }
     );
     return res.data;
   }
 
   // 2. REQUIREMENT ANALYZER
-  static async analyzeRequirements(documentText: string): Promise<RequirementOutput> {
+  static async analyzeRequirements(documentText: string, userId?: string): Promise<RequirementOutput> {
     const prompt = `
 You are a senior software requirement engineer.
 Analyze the following project proposal/requirement document:
@@ -118,7 +119,7 @@ Extract and analyze requirements. Generate a JSON object matching EXACTLY this T
     const res = await AIRouterService.generateJSON<RequirementOutput>(
       prompt,
       () => this.generateDynamicRequirementAnalysis(documentText),
-      { feature: 'analyzer' }
+      { feature: 'analyzer', ...(userId ? { userId } : {}) }
     );
     return res.data;
   }
@@ -128,7 +129,8 @@ Extract and analyze requirements. Generate a JSON object matching EXACTLY this T
     projectName: string,
     description: string,
     teamSize?: number,
-    deadline?: string
+    deadline?: string,
+    userId?: string
   ): Promise<RiskAnalysisOutput> {
     const prompt = `
 You are a risk management AI for software projects.
@@ -169,7 +171,7 @@ Generate a JSON object matching EXACTLY this structure:
     const res = await AIRouterService.generateJSON<RiskAnalysisOutput>(
       prompt,
       () => this.generateDynamicRiskAnalysis(projectName, description, teamSize, deadline),
-      { feature: 'risk' }
+      { feature: 'risk', ...(userId ? { userId } : {}) }
     );
     return res.data;
   }
@@ -216,7 +218,8 @@ Generate a JSON object matching EXACTLY this structure:
     completedTasks: string[],
     pendingTasks: string[],
     commitStats: string,
-    blockages: string[]
+    blockages: string[],
+    userId?: string
   ) {
     const prompt = `
 You are an Agile Sprint Analyst AI.
@@ -244,7 +247,7 @@ Return a JSON object:
         delayRisks: blockages.length > 0 ? blockages : ['No active sprint blockages detected'],
         productivityIndex: Math.floor(Math.random() * 20) + 75,
       }),
-      { feature: 'general' }
+      { feature: 'general', ...(userId ? { userId } : {}) }
     );
     return res.data;
   }

@@ -78,7 +78,7 @@ export interface GitHubIntelligenceOutput {
 }
 
 export function parseGitHubRepoPath(input: string): string {
-  if (!input) return 'facebook/react';
+  if (!input) return '';
   let clean = input.trim();
   clean = clean.replace(/^https?:\/\/github\.com\//i, '');
   clean = clean.replace(/\/$/, '');
@@ -87,13 +87,21 @@ export function parseGitHubRepoPath(input: string): string {
   if (parts.length >= 2) {
     return `${parts[0]}/${parts[1]}`;
   }
-  return clean || 'facebook/react';
+  return clean;
 }
 
 export class GitHubService {
   private static async getHeaders(token?: string) {
-    const activeToken = token || process.env.GITHUB_TOKEN;
-    if (!activeToken) return { 'User-Agent': 'ProjectCollab-AI-App' };
+    const rawToken = token || process.env.GITHUB_TOKEN;
+    // Treat placeholder / obviously-invalid tokens the same as "no token".
+    // An invalid Bearer value causes GitHub to return 401, which triggers the
+    // offline fallback even though unauthenticated requests would succeed.
+    const PLACEHOLDER_PATTERNS = ['ghp_your-github-token', 'your-github-token', 'placeholder', ''];
+    const activeToken =
+      rawToken && !PLACEHOLDER_PATTERNS.some((p) => rawToken.toLowerCase().includes(p.toLowerCase()))
+        ? rawToken
+        : undefined;
+    if (!activeToken) return { 'User-Agent': 'ProjectCollab-AI-App', Accept: 'application/vnd.github.v3+json' };
     return {
       Authorization: `Bearer ${activeToken}`,
       Accept: 'application/vnd.github.v3+json',

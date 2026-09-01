@@ -56,8 +56,42 @@ export default function GitHubIntegration() {
   const [platformUsers, setPlatformUsers] = useState<Array<{ id: string; name: string; email: string; avatarUrl?: string; githubUsername?: string }>>([]);
   const [loadingPlatformUsers, setLoadingPlatformUsers] = useState(false);
 
-  // ── Load projects on mount ────────────────────────────────────────────────
+  // ── Auth scoping (used to isolate per-account state and localStorage keys) ──
+  const currentUser = useAuthStore((s) => s.user);
+  const currentUserId = currentUser?.id ?? '';
+  const accessToken = useAuthStore((s) => s.accessToken);
+
+  // ── Load projects on mount / account switch ──────────────────────────────
   useEffect(() => {
+    // On account switch or logout, clear ALL cached GitHub Intelligence state
+    // so the previous account's commits/branches/PRs/contributors/chart/activity
+    // are never visible to the next account (mirrors the team chat isolation fix).
+    setProjects([]);
+    setSelectedProjectId('');
+    setConnectedRepos([]);
+    setSelectedRepoPath('');
+    setPlatformUsers([]);
+    setData(null);
+    setError(null);
+    setLastSync(null);
+    setSyncResult(null);
+    setShowGuide(false);
+    setShowConnectModal(false);
+    setNewRepoInput('');
+    setConnectError('');
+    setConnectingRepo(false);
+    setActiveTab('ai');
+
+    // Migrate away from the legacy account-agnostic key (if present).
+    localStorage.removeItem('pcai-github-project');
+
+    if (!accessToken) {
+
+      setLoadingProjects(false);
+      setLoadingRepos(false);
+      return;
+    }
+
     const loadProjects = async () => {
       setLoadingProjects(true);
       try {
@@ -71,8 +105,8 @@ export default function GitHubIntegration() {
         });
         setProjects(allProjects);
 
-        // Restore last-used project from localStorage
-        const lastPid = localStorage.getItem('pcai-github-project');
+        // Restore last-used project from localStorage (scoped to this account)
+        const lastPid = localStorage.getItem(`pcai-github-project-${currentUserId}`);
         if (lastPid && allProjects.find(p => p.id === lastPid)) {
           setSelectedProjectId(lastPid);
         } else if (allProjects.length > 0) {
@@ -85,7 +119,7 @@ export default function GitHubIntegration() {
       }
     };
     loadProjects();
-  }, []);
+  }, [accessToken, currentUserId]);
 
   // ── Load connected repos whenever project changes ─────────────────────────
   useEffect(() => {
@@ -100,7 +134,7 @@ export default function GitHubIntegration() {
         setConnectedRepos(repos);
 
         // Pick last-used repo for this project or fall back to first
-        const lastRepo = localStorage.getItem(`pcai-github-repo-${selectedProjectId}`);
+        const lastRepo = localStorage.getItem(`pcai-github-repo-${currentUserId}-${selectedProjectId}`);
         if (lastRepo && repos.find(r => r.fullPath === lastRepo)) {
           setSelectedRepoPath(lastRepo);
         } else if (repos.length > 0) {
@@ -117,8 +151,8 @@ export default function GitHubIntegration() {
       }
     };
     loadRepos();
-    localStorage.setItem('pcai-github-project', selectedProjectId);
-  }, [selectedProjectId]);
+    localStorage.setItem(`pcai-github-project-${currentUserId}`, selectedProjectId);
+  }, [selectedProjectId, currentUserId]);
 
   // ── Load team members to build githubUsername map ─────────────────────────
   const loadTeamMembers = useCallback(async () => {
@@ -166,10 +200,10 @@ export default function GitHubIntegration() {
     // Always re-fetch team members so githubUsername is never stale
     await loadTeamMembers();
     try {
-      const res = await api.get('/github/intelligence', { params: { path } });
+      const res = await api.get('/github/intelligence', { params: { path, projectId: selectedProjectId } });
       setData(res.data);
       if (selectedProjectId) {
-        localStorage.setItem(`pcai-github-repo-${selectedProjectId}`, path);
+        localStorage.setItem(`pcai-github-repo-${currentUserId}-${selectedProjectId}`, path);
       }
     } catch (err: any) {
       console.error('GitHub API Fetch Error:', err);
@@ -181,7 +215,7 @@ export default function GitHubIntegration() {
       setIsSyncing(false);
       setIsLoading(false);
     }
-  }, [selectedProjectId, loadTeamMembers]);
+  }, [selectedProjectId, loadTeamMembers, currentUserId]);
 
   // Auto-fetch when selectedRepoPath changes
   useEffect(() => {
@@ -303,8 +337,6 @@ export default function GitHubIntegration() {
   const contributors = data?.contributors || [];
   const aiInsights = data?.aiInsights || null;
   const totalCommitsCount = data?.stats?.totalCommits ?? commits.length;
-
-  const currentUser = useAuthStore((s) => s.user);
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
@@ -970,7 +1002,7 @@ export default function GitHubIntegration() {
             <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
               <Activity className="w-5 h-5 text-primary" /> Live Activity Feed
             </h2>
-            <ActivityFeed projectId={selectedProjectId} limit={30} />
+            <ActivityFeed key={`${currentUserId}:${selectedProjectId}`} projectId={selectedProjectId} limit={30} />
           </div>
         )}
       </>}
