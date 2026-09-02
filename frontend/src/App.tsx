@@ -40,6 +40,7 @@ const Drive = lazy(() => import('./pages/Drive'));
 const AIPlanner = lazy(() => import('./pages/AIPlanner'));
 const AIProjectManager = lazy(() => import('./pages/AIProjectManager'));
 const GitHub = lazy(() => import('./pages/GitHub'));
+const Deployment = lazy(() => import('./pages/Deployment'));
 
 // Lazy-loaded Reports & Settings
 const Reports = lazy(() => import('./pages/Reports'));
@@ -90,6 +91,7 @@ export default function App() {
           <Route path="/ai" element={<ProtectedRoute><AIPlanner /></ProtectedRoute>} />
           <Route path="/ai-pm" element={<ProtectedRoute><AIProjectManager /></ProtectedRoute>} />
           <Route path="/github" element={<ProtectedRoute><GitHub /></ProtectedRoute>} />
+          <Route path="/deploy" element={<ProtectedRoute><Deployment /></ProtectedRoute>} />
 
           {/* Reports */}
           <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />

@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Users, FolderOpen, MessageSquare, Zap, Bell,
   Settings as SettingsIcon, Search, ShieldAlert, Menu, X,
   CheckSquare, BarChart3, Github, CalendarDays, HardDrive,
-  FileBarChart, Users2, ArrowRight, Loader2, Mail, Lock, BrainCircuit
+  FileBarChart, Users2, ArrowRight, Loader2, Mail, Lock, BrainCircuit, Rocket
 } from 'lucide-react';
 import GlobalSearch from '../components/GlobalSearch';
 import AccountSwitcher from '../components/AccountSwitcher';
@@ -272,6 +272,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
         { name: 'AI Planner', path: '/ai', icon: Zap },
         { name: 'AI Project Manager', path: '/ai-pm', icon: BrainCircuit },
         { name: 'GitHub', path: '/github', icon: Github },
+        { name: 'Deployment', path: '/deploy', icon: Rocket },
         { name: 'Reports', path: '/reports', icon: FileBarChart },
       ],
     },
