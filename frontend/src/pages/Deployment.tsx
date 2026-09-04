@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Rocket, Loader2, FolderOpen, Server, ExternalLink } from 'lucide-react';
+import { Rocket, Loader2, FolderOpen, Server, ExternalLink, Settings2 } from 'lucide-react';
 import api from '../utils/api';
 import { useAuthStore } from '../store/auth.store';
 import DeploymentIntelligence from '../components/DeploymentIntelligence';
+import DeployProviderSettings from '../components/DeployProviderSettings';
 
 interface ProjectSummary {
   id: string;
@@ -14,6 +15,7 @@ export default function Deployment() {
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Auth scoping (isolates cached project selection per account)
   const currentUserId = useAuthStore((s) => s.user?.id ?? '');
@@ -127,8 +129,23 @@ export default function Deployment() {
               ))}
             </div>
           )}
+          {selectedProjectId && (
+            <button
+              onClick={() => setSettingsOpen((open) => !open)}
+              className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
+                settingsOpen
+                  ? 'bg-primary/10 text-primary border-primary/40'
+                  : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'
+              }`}
+            >
+              <Settings2 className="w-3.5 h-3.5" /> Provider Settings
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Per-project deploy provider settings (Vercel project id / Render service id) */}
+      {selectedProjectId && settingsOpen && <DeployProviderSettings projectId={selectedProjectId} />}
 
       {/* Deployment Intelligence panel */}
       {selectedProjectId ? (

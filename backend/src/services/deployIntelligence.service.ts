@@ -2,13 +2,15 @@
 // Deployment Intelligence service — read-only Vercel + Render API integration.
 //
 // Every call below hits the REAL provider APIs (api.vercel.com / api.render.com)
-// server-side with the VERCEL_TOKEN / RENDER_API_KEY from env. Nothing is ever
-// faked: if a field cannot be read from the provider response it is returned as
-// `null` with a matching `*Unavailable: true` flag so the UI can label it
-// "Unavailable" instead of inventing data.
+// server-side with the VERCEL_API_TOKEN / RENDER_API_KEY from env. Nothing is
+// ever faked: if a field cannot be read from the provider response it is
+// returned as `null` with a matching `*Unavailable: true` flag so the UI can
+// label it "Unavailable" instead of inventing data.
 //
-// Provider API tokens are used ONLY in this module's Authorization headers and
-// are never included in any returned payload.
+// Per-project provider ids (the Vercel project id and the Render service id)
+// are passed in as arguments by the route, which reads them from the Project
+// row in the DB. The account-level API tokens stay in env and are used ONLY in
+// this module's Authorization headers — never included in any returned payload.
 // ─────────────────────────────────────────────────────────────────────────────
 import axios from 'axios';
 
@@ -103,10 +105,10 @@ export interface RenderLogs {
   hasMore: boolean;
   fetchedAt: string;
 }
-
 // ─── In-memory TTL cache ────────────────────────────────────────────────────
 // 45s for intelligence snapshots, 30s for logs, so dashboard auto-refresh
-// (every 30s) never hammers the provider APIs.
+// (every 30s) never hammers the provider APIs. Keys include the provider id so
+// different projects' deployments never share a cache entry.
 interface CacheEntry {
   expiresAt: number;
   data: unknown;
@@ -136,16 +138,23 @@ function isPlaceholder(val?: string): boolean {
   return lower.includes('your');
 }
 
-function isConfiguredVercel(): boolean {
-  const token = process.env.VERCEL_TOKEN?.trim();
-  const projectId = process.env.VERCEL_PROJECT_ID?.trim();
-  return !!token && !!projectId && !isPlaceholder(token) && !isPlaceholder(projectId);
+// Tokens are account-level and stay in env. The per-project provider id is an
+// argument so the DB value (Project.vercelProjectId / Project.renderServiceId)
+// drives which target we query.
+// VERCEL_API_TOKEN is the documented name; VERCEL_TOKEN is the legacy name in
+// existing .env files — either works so existing deployments keep functioning.
+function vercelToken(): string | null {
+  return process.env.VERCEL_API_TOKEN?.trim() || process.env.VERCEL_TOKEN?.trim() || null;
 }
 
-function isConfiguredRender(): boolean {
+function hasVercelToken(): boolean {
+  const token = vercelToken();
+  return !!token && !isPlaceholder(token);
+}
+
+function hasRenderKey(): boolean {
   const apiKey = process.env.RENDER_API_KEY?.trim();
-  const serviceId = process.env.RENDER_SERVICE_ID?.trim();
-  return !!apiKey && !!serviceId && !isPlaceholder(apiKey) && !isPlaceholder(serviceId);
+  return !!apiKey && !isPlaceholder(apiKey);
 }
 
 // Optional API base overrides (testing/gateway use only). When unset the real
@@ -157,7 +166,6 @@ const RENDER_API_BASE = () => {
   const base = (process.env.RENDER_API_BASE?.trim() || 'https://api.render.com/v1').replace(/\/+$/, '');
   return base.endsWith('/v1') ? base : `${base}/v1`;
 };
-
 // ─── Status normalizers ─────────────────────────────────────────────────────
 function normalizeVercelStatus(state?: string | null): DeployStatus {
   const s = (state || '').toUpperCase();
@@ -202,28 +210,74 @@ function diffMs(from?: string | null, to?: string | null): number | null {
   if (isNaN(a) || isNaN(b) || b < a) return null;
   return b - a;
 }
+// ─── Render response helpers ────────────────────────────────────────────────
+// The Render REST API wraps each list entry in a cursor envelope, e.g.
+// [{ "deploy": {...}, "cursor": "..." }]. These helpers unwrap the envelope and
+// fall back to a bare object for robustness.
+function unwrapRenderList(raw: any[]): any[] {
+  return (raw || []).map((item: any) => {
+    if (item && typeof item === 'object' && ('deploy' in item || 'event' in item)) {
+      return item.deploy ?? item.event ?? item;
+    }
+    return item;
+  });
+}
+
+/** The service-level GET exposes the live branch, ownerId + service name. */
+interface RenderServiceMeta {
+  id: string | null;
+  name: string | null;
+  branch: string | null;
+  ownerId: string | null;
+  type: string | null;
+  url: string | null;
+}
+
+async function fetchRenderServiceMeta(serviceId: string): Promise<RenderServiceMeta> {
+  const cacheKey = `render:svc:${serviceId}`;
+  const hit = getCached<RenderServiceMeta>(cacheKey);
+  if (hit.cached && hit.data) return hit.data;
+
+  const apiKey = process.env.RENDER_API_KEY!.trim();
+  const res = await axios.get(`${RENDER_API_BASE()}/services/${encodeURIComponent(serviceId)}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    timeout: 12000,
+  });
+
+  const meta: RenderServiceMeta = {
+    id: res.data?.id || serviceId,
+    name: res.data?.name || null,
+    branch: res.data?.branch || null,
+    ownerId: res.data?.ownerId || null,
+    type: res.data?.type || null,
+    url: res.data?.serviceDetails?.url || null,
+  };
+  setCached(cacheKey, meta, INTEL_TTL_MS);
+  return meta;
+}
 
 // ─── Service ────────────────────────────────────────────────────────────────
 export class DeployIntelligenceService {
-  /**
-   * Vercel deployment intelligence:
+/**
+   * Vercel deployment intelligence for ONE project:
    *   - GET /v6/deployments?projectId=...   → deploy history (status/commit/branch/ts/duration)
    *   - GET /v9/projects/:id                → project name + current live URL/domain
-   * Real data only. Provider failures surface as `configured:true` + a `message`,
-   * never as fabricated records.
+   * `vercelProjectId` is the project-scoped Vercel id from the DB; only the
+   * account token is read from env.
    */
-  static async getVercelIntelligence(): Promise<VercelIntelligence> {
-    const hit = getCached<VercelIntelligence>('vercel:intel');
+  static async getVercelIntelligence(vercelProjectId: string): Promise<VercelIntelligence> {
+    const cacheKey = `vercel:intel:${vercelProjectId}`;
+    const hit = getCached<VercelIntelligence>(cacheKey);
     if (hit.cached && hit.data) return hit.data;
 
-    const base = { provider: 'vercel' as const, configured: isConfiguredVercel() };
+    const base = { provider: 'vercel' as const, configured: hasVercelToken() };
 
     if (!base.configured) {
       const payload: VercelIntelligence = {
         ...base,
         message:
-          'VERCEL_TOKEN or VERCEL_PROJECT_ID is not configured. Add them to the backend environment to enable Vercel deployment intelligence.',
-        projectId: null,
+          'VERCEL_API_TOKEN is not configured. Add it to the backend environment to enable Vercel deployment intelligence.',
+        projectId: vercelProjectId,
         projectName: null,
         projectNameUnavailable: true,
         liveUrl: null,
@@ -232,12 +286,12 @@ export class DeployIntelligenceService {
         deployments: [],
         fetchedAt: new Date().toISOString(),
       };
-      setCached('vercel:intel', payload, INTEL_TTL_MS);
+      setCached(cacheKey, payload, INTEL_TTL_MS);
       return payload;
     }
 
-    const token = process.env.VERCEL_TOKEN!.trim();
-    const projectId = process.env.VERCEL_PROJECT_ID!.trim();
+    const token = vercelToken()!;
+    const projectId = vercelProjectId.trim();
 
     try {
       const [deploysRes, projectRes] = await Promise.all([
@@ -309,11 +363,13 @@ export class DeployIntelligenceService {
         deployments,
         fetchedAt: new Date().toISOString(),
       };
-      setCached('vercel:intel', payload, INTEL_TTL_MS);
+      setCached(cacheKey, payload, INTEL_TTL_MS);
       return payload;
     } catch (err: any) {
       console.error(
         '[DEPLOY INTELLIGENCE ERROR] Vercel API request failed:',
+        `projectId=${projectId}`,
+        `url=${VERCEL_API_BASE()}/v6/deployments`,
         err.response?.status || err.message,
         err.response?.data?.error?.message || ''
       );
@@ -338,24 +394,26 @@ export class DeployIntelligenceService {
       };
     }
   }
-
-  /**
-   * Render deployment intelligence:
-   *   - GET /v1/services/:serviceId/deploys   → deploy history/status
-   *   - GET /v1/services/:serviceId/events    → recent service activity
+/**
+   * Render deployment intelligence for ONE service:
+   *   - GET /v1/services/:serviceId          → service name + live branch + ownerId (for logs)
+   *   - GET /v1/services/:serviceId/deploys  → deploy history/status (cursor envelope)
+   *   - GET /v1/services/:serviceId/events   → recent service activity (cursor envelope)
+   * `renderServiceId` is the project-scoped Render service id from the DB.
    */
-  static async getRenderIntelligence(): Promise<RenderIntelligence> {
-    const hit = getCached<RenderIntelligence>('render:intel');
+  static async getRenderIntelligence(renderServiceId: string): Promise<RenderIntelligence> {
+    const cacheKey = `render:intel:${renderServiceId}`;
+    const hit = getCached<RenderIntelligence>(cacheKey);
     if (hit.cached && hit.data) return hit.data;
 
-    const base = { provider: 'render' as const, configured: isConfiguredRender() };
+    const base = { provider: 'render' as const, configured: hasRenderKey() };
 
     if (!base.configured) {
       const payload: RenderIntelligence = {
         ...base,
         message:
-          'RENDER_API_KEY or RENDER_SERVICE_ID is not configured. Add them to the backend environment to enable Render deployment intelligence.',
-        serviceId: null,
+          'RENDER_API_KEY is not configured. Add it to the backend environment to enable Render deployment intelligence.',
+        serviceId: renderServiceId,
         serviceName: null,
         serviceNameUnavailable: true,
         current: null,
@@ -363,16 +421,17 @@ export class DeployIntelligenceService {
         events: [],
         fetchedAt: new Date().toISOString(),
       };
-      setCached('render:intel', payload, INTEL_TTL_MS);
+      setCached(cacheKey, payload, INTEL_TTL_MS);
       return payload;
     }
 
     const apiKey = process.env.RENDER_API_KEY!.trim();
-    const serviceId = process.env.RENDER_SERVICE_ID!.trim();
+    const serviceId = renderServiceId.trim();
     const headers = { Authorization: `Bearer ${apiKey}` };
 
     try {
-      const [deploysRes, eventsRes] = await Promise.all([
+      const [meta, deploysRes, eventsRes] = await Promise.all([
+        fetchRenderServiceMeta(serviceId),
         axios.get(`${RENDER_API_BASE()}/services/${encodeURIComponent(serviceId)}/deploys`, {
           params: { limit: 10 },
           headers,
@@ -385,34 +444,38 @@ export class DeployIntelligenceService {
       ]);
 
       const rawDeploys: any[] = Array.isArray(deploysRes.data) ? deploysRes.data : deploysRes.data?.deploys || [];
-      const deploys: DeployEntry[] = rawDeploys.map((d: any): DeployEntry => {
-        const commit = d.commit || {};
-        const branch = commit.branch || null;
-        const commitSha = shortSha(commit.id || null, 7);
-        const commitMessage = commit.message || null;
-        const createdAt = toIso(d.createdAt);
-        const finishedAt = toIso(d.finishedAt);
-        return {
-          id: d.id || null,
-          name: commit.message || null, // Render deploys have no display name; use commit message.
-          url: null,
-          status: normalizeRenderStatus(d.status),
-          createdAt,
-          finishedAt,
-          durationMs: diffMs(createdAt, finishedAt),
-          durationUnavailable: !(createdAt && finishedAt),
-          branch,
-          branchUnavailable: !branch,
-          commitSha,
-          commitShaUnavailable: !commitSha,
-          commitMessage,
-          commitMessageUnavailable: !commitMessage,
-          source: 'render',
-        };
-      });
+      const deploys: DeployEntry[] = unwrapRenderList(rawDeploys)
+        .slice(0, 10)
+        .map((d: any): DeployEntry => {
+          const commit = d.commit || {};
+          // Render deploy commits carry no branch; the service-level branch
+          // is the deployment's source branch, so use it as the fallback.
+          const branch = commit.branch || meta.branch || null;
+          const commitSha = shortSha(commit.id || null, 7);
+          const commitMessage = commit.message || null;
+          const createdAt = toIso(d.createdAt);
+          const finishedAt = toIso(d.finishedAt);
+          return {
+            id: d.id || null,
+            name: commit.message || null, // Render deploys have no display name; use commit message.
+            url: meta.url || null,
+            status: normalizeRenderStatus(d.status),
+            createdAt,
+            finishedAt,
+            durationMs: diffMs(createdAt, finishedAt),
+            durationUnavailable: !(createdAt && finishedAt),
+            branch,
+            branchUnavailable: !branch,
+            commitSha,
+            commitShaUnavailable: !commitSha,
+            commitMessage,
+            commitMessageUnavailable: !commitMessage,
+            source: 'render',
+          };
+        });
 
       const rawEvents: any[] = Array.isArray(eventsRes.data) ? eventsRes.data : eventsRes.data?.events || [];
-      const events: RenderEvent[] = rawEvents.slice(0, 10).map((e: any): RenderEvent => {
+      const events: RenderEvent[] = unwrapRenderList(rawEvents).slice(0, 10).map((e: any): RenderEvent => {
         const details = e.details;
         return {
           id: e.id || null,
@@ -441,18 +504,20 @@ export class DeployIntelligenceService {
         ...base,
         message: null,
         serviceId,
-        serviceName: null,
-        serviceNameUnavailable: true,
+        serviceName: meta.name || null,
+        serviceNameUnavailable: !meta.name,
         current,
         deploys,
         events,
         fetchedAt: new Date().toISOString(),
       };
-      setCached('render:intel', payload, INTEL_TTL_MS);
+      setCached(cacheKey, payload, INTEL_TTL_MS);
       return payload;
     } catch (err: any) {
       console.error(
         '[DEPLOY INTELLIGENCE ERROR] Render API request failed:',
+        `serviceId=${serviceId}`,
+        `url=${RENDER_API_BASE()}/services/${serviceId}`,
         err.response?.status || err.message,
         err.response?.data?.message || ''
       );
@@ -471,19 +536,26 @@ export class DeployIntelligenceService {
       };
     }
   }
-
-  /**
+/**
    * Render backend runtime logs — most recent first, paginated by `offset`.
-   *   - GET /v1/services/:serviceId/logs?limit&offset
+   *
+   * Render's REST API serves logs from the top-level `/v1/logs` endpoint (not
+   * `/services/:id/logs`, which 404s):
+   *   - GET /v1/logs?ownerId=...&resource=<serviceId>&direction=backward&limit&startTime&endTime
+   *
+   * List responses are paginated by TIME, not offset, so we page backwards
+   * (limit=100 at a time, threading the returned `nextEndTime` as the next
+   * `endTime`) until we have fetched `offset` extra lines, then slice the
+   * requested page out.
    */
-  static async getRenderLogs(offset = 0, limit = 100): Promise<RenderLogs> {
-    const cacheKey = `render:logs:${offset}:${limit}`;
+  static async getRenderLogs(renderServiceId: string, offset = 0, limit = 100): Promise<RenderLogs> {
+    const cacheKey = `render:logs:${renderServiceId}:${offset}:${limit}`;
     const hit = getCached<RenderLogs>(cacheKey);
     if (hit.cached && hit.data) return hit.data;
 
     const base = {
       provider: 'render' as const,
-      configured: isConfiguredRender(),
+      configured: hasRenderKey(),
       limit,
       offset,
       fetchedAt: new Date().toISOString(),
@@ -493,7 +565,7 @@ export class DeployIntelligenceService {
       const payload: RenderLogs = {
         ...base,
         message:
-          'RENDER_API_KEY or RENDER_SERVICE_ID is not configured. Add them to the backend environment to enable Render logs.',
+          'RENDER_API_KEY is not configured. Add it to the backend environment to enable Render logs.',
         logs: [],
         nextOffset: null,
         hasMore: false,
@@ -503,39 +575,91 @@ export class DeployIntelligenceService {
     }
 
     const apiKey = process.env.RENDER_API_KEY!.trim();
-    const serviceId = process.env.RENDER_SERVICE_ID!.trim();
+    const serviceId = renderServiceId.trim();
 
     try {
-      const res = await axios.get(`${RENDER_API_BASE()}/services/${encodeURIComponent(serviceId)}/logs`, {
-        params: { limit, offset },
-        headers: { Authorization: `Bearer ${apiKey}` },
-        timeout: 15000,
-      });
+      const meta = await fetchRenderServiceMeta(serviceId);
+      if (!meta.ownerId) {
+        const payload: RenderLogs = {
+          ...base,
+          message: 'Render did not expose an ownerId for this service; cannot paginate logs.',
+          logs: [],
+          nextOffset: null,
+          hasMore: false,
+        };
+        setCached(cacheKey, payload, LOGS_TTL_MS);
+        return payload;
+      }
 
-      const raw: any[] = Array.isArray(res.data) ? res.data : res.data?.logs || [];
-      const logs: RenderLogEntry[] = raw.map((l: any): RenderLogEntry => ({
-        id: l.id || null,
-        message: typeof l.message === 'string' ? l.message : null,
-        type: l.type || 'log',
-        updatedAt: toIso(l.updatedAt || l.timestamp),
-      }));
+      const params: Record<string, string | number> = {
+        ownerId: meta.ownerId,
+        resource: serviceId,
+        direction: 'backward', // most-recent first
+        limit: 100, // max supported by the API
+      };
 
-      // Most recent first (the provider can return chronological order).
-      logs.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+      const collected: RenderLogEntry[] = [];
+      let hasMore = true;
+      let pageCount = 0;
+      const MAX_PAGES = 12; // guards against runaway loops on huge offsets
 
-      const hasMore = logs.length === limit;
+      while (hasMore && pageCount < MAX_PAGES) {
+        const res = await axios.get(`${RENDER_API_BASE()}/logs`, {
+          params,
+          headers: { Authorization: `Bearer ${apiKey}` },
+          timeout: 15000,
+        });
+
+        const raw: any[] = Array.isArray(res.data) ? res.data : res.data?.logs || [];
+        const pageLogs: RenderLogEntry[] = raw.map((l: any): RenderLogEntry => {
+          const labels: Array<{ name?: string; value?: string }> = Array.isArray(l.labels) ? l.labels : [];
+          const label = (name: string) => labels.find((x) => x.name === name)?.value ?? null;
+          const level = label('level');
+          const streamType = label('type');
+          // Keep error lines flagged as 'error' (the UI colors them red) even
+          // though the stream type label itself is 'app'/'build'/etc.
+          const type = level === 'error' ? 'error' : streamType || level || 'log';
+          return {
+            id: l.id || null,
+            message: typeof l.message === 'string' ? l.message : null,
+            type,
+            updatedAt: toIso(l.timestamp),
+          };
+        });
+        collected.push(...pageLogs);
+
+        // The most recent fetched timestamp on the last page is the boundary
+        // for the NEXT older page.
+        const wanted = offset + limit;
+        if (collected.length >= wanted) break;
+
+        hasMore = res.data?.hasMore === true;
+        const nextEnd = res.data?.nextEndTime;
+        if (!hasMore || !nextEnd) break;
+        params.endTime = nextEnd as string;
+        pageCount++;
+      }
+
+      // collected is newest-first (each page is reversed ascending within).
+      collected.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+      const logs = collected.slice(offset, offset + limit);
+      const reachedEnd = collected.length < offset + limit;
+      const nextOffset = reachedEnd ? null : offset + limit;
+
       const payload: RenderLogs = {
         ...base,
         message: null,
         logs,
-        nextOffset: hasMore ? offset + limit : null,
-        hasMore,
+        nextOffset,
+        hasMore: !reachedEnd,
       };
       setCached(cacheKey, payload, LOGS_TTL_MS);
       return payload;
     } catch (err: any) {
       console.error(
         '[DEPLOY INTELLIGENCE ERROR] Render logs request failed:',
+        `serviceId=${serviceId}`,
+        `url=${RENDER_API_BASE()}/logs`,
         err.response?.status || err.message,
         err.response?.data?.message || ''
       );

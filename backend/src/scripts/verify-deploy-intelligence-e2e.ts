@@ -18,14 +18,20 @@ const ok = (cond: boolean, label: string, detail = '') => {
  * LIVE END-TO-END VERIFICATION of Deployment Intelligence against local MOCK
  * Vercel+Render providers. scripts/mock-deploy-providers.ts serves BOTH APIs
  * on :8899 with realistic payloads (success/building/failed/queued deploys,
- * missing-meta edge cases, 250 paginated log lines).
+ * missing-meta edge cases, 250 paginated log lines, cursor envelopes).
  *
  * Run procedure (PowerShell, from backend/):
  *   1. npx ts-node src/scripts/mock-deploy-providers.ts          # window 1 — keep running
- *   2. $env:VERCEL_TOKEN="dummy-vercel-token-abc123"; $env:VERCEL_PROJECT_ID="prj_dummy-vercel-project"; $env:RENDER_API_KEY="rnd_dummy-render-key-xyz789"; $env:RENDER_SERVICE_ID="srv_dummy-render-service"; $env:VERCEL_API_BASE="http://localhost:8899"; $env:RENDER_API_BASE="http://localhost:8899"
+ *   2. $env:VERCEL_TOKEN="dummy-vercel-token-abc123"; $env:RENDER_API_KEY="rnd_dummy-render-key-xyz789"; $env:VERCEL_API_BASE="http://localhost:8899"; $env:RENDER_API_BASE="http://localhost:8899"
  *      npm run dev                                               # window 2 (dotenv will NOT override these)
  *   3. npx ts-node src/scripts/verify-deploy-intelligence-e2e.ts # window 3
  *      → expect "=== RESULT: ALL PASS ===" and exit code 0
+ *
+ * The per-project Vercel project id / Render service id are stored in the
+ * Project row (Project.vercelProjectId / Project.renderServiceId) and are
+ * provisioned here through PATCH /api/projects/:id/deploy-settings — the same
+ * path a team member uses in Project Settings. Only the account tokens and the
+ * API base overrides come from env.
  *
  * With real credentials in .env and NO *_API_BASE overrides, the same endpoints
  * hit the production Vercel/Render APIs instead — code path is identical.
@@ -43,6 +49,14 @@ async function run() {
     const teamRes = await axios.post(`${BASE}/api/teams/create`, { name: 'E2E Deploy Team' }, { headers: { Authorization: `Bearer ${token}` } });
     const projRes = await axios.post(`${BASE}/api/projects/create`, { title: 'E2E Deploy Project', description: 'x', teamId: teamRes.data.team.id }, { headers: { Authorization: `Bearer ${token}` } });
     const projectId = projRes.data.project ? projRes.data.project.id : projRes.data.id;
+
+    // Configure this project's provider ids the same way Project Settings does.
+    const settingsRes = await axios.patch(`${BASE}/api/projects/${projectId}/deploy-settings`, {
+      vercelProjectId: 'prj_dummy-vercel-project',
+      renderServiceId: 'srv_dummy-render-service'
+    }, { headers: { Authorization: `Bearer ${token}` } });
+    ok(settingsRes.status === 200 && settingsRes.data.project.vercelProjectId === 'prj_dummy-vercel-project' && settingsRes.data.project.renderServiceId === 'srv_dummy-render-service',
+      'deploy-settings PATCH stored per-project provider ids');
 
     await axios.post(`${MOCK}/__reset`);
     const auth = { headers: { Authorization: `Bearer ${token}` } };
@@ -76,6 +90,7 @@ async function run() {
     ok(r.provider === 'render' && r.configured === true, 'configured:true', `message=${r.message}`);
     ok(r.message === null, 'no error message');
     ok(r.serviceId === 'srv_dummy-render-service', 'serviceId', r.serviceId);
+    ok(r.serviceName === 'project-collab' && r.serviceNameUnavailable === false, 'serviceName from service GET', r.serviceName);
     ok(r.deploys.length === 5, '5 deploys', `len=${r.deploys.length}`);
     const rd0 = r.deploys[0];
     ok(rd0.status === 'success' && rd0.id === 'dep_live_1', 'live→success', rd0.id);
@@ -85,11 +100,19 @@ async function run() {
     ok(r.deploys[1].status === 'building', 'build_in_progress→building');
     ok(r.deploys[2].status === 'failed', 'deploy_failed→failed');
     ok(r.deploys[3].status === 'canceled', 'canceled→canceled');
-    ok(r.deploys[4].status === 'success' && r.deploys[4].branchUnavailable && r.deploys[4].commitShaUnavailable, 'no-commit deploy → unavailable flags');
+    ok(r.deploys[4].status === 'success' && r.deploys[4].commitShaUnavailable && r.deploys[4].commitMessageUnavailable,
+      'no-commit deploy → unavailable flags (branch falls back to service branch)', `branch=${r.deploys[4].branch}`);
     ok(r.current?.status === 'success' && r.current?.commitSha === '9f4c2ab', 'current derived from latest deploy');
     ok(r.events.length === 4, '4 events', `len=${r.events.length}`);
     ok(r.events[0].type === 'service.updated' && r.events[0].details === 'Deploy completed successfully', 'event type+details');
     ok(r.events[3].details === null && r.events[3].detailsUnavailable === true, 'event without details → unavailable flag');
+
+    // ── NOT-CONFIGURED 404 ──────────────────────────────────────────────────
+    console.log('\n--- Unconfigured project → 404 ("Deployment not configured") ---');
+    const proj2Res = await axios.post(`${BASE}/api/projects/create`, { title: 'E2E Deploy Project 2', description: 'y', teamId: teamRes.data.team.id }, { headers: { Authorization: `Bearer ${token}` } });
+    const projectId2 = proj2Res.data.project ? proj2Res.data.project.id : proj2Res.data.id;
+    const notCfg = await axios.get(`${BASE}/api/deploy-intelligence/vercel/${projectId2}`, { ...auth, validateStatus: () => true });
+    ok(notCfg.status === 404 && /not configured for this project/i.test(notCfg.data?.error || ''), `unconfigured → HTTP 404 message=${notCfg.data?.error}`);
 
     // ── RENDER LOGS ────────────────────────────────────────────────────────
     console.log('\n--- Render logs (/api/deploy-intelligence/render/:projectId/logs) ---');

@@ -63,10 +63,23 @@ async function runVerification() {
 
     log(`[+] Project A: ${projAId}, Project B: ${projBId}`);
 
-    // Step 3: Member access —  depending on whether the provider env vars are
-    // configured, the member request returns 200 (configured) or 503 (unconfigured.
+    // Step 2b: Configure per-project deploy provider ids (same path Project
+    // Settings uses). Without these the endpoints intentionally return 404
+    // ("Deployment not configured for this project"), which would mask the
+    // access-control checks below.
+    log('\n--- STEP 2b: Configure deploy provider ids per project ---');
+    await axios.patch(`${BASE_URL}/api/projects/${projAId}/deploy-settings`,
+      { vercelProjectId: 'prj_proj-a-vercel', renderServiceId: 'srv_proj-a-render' },
+      { headers: { Authorization: `Bearer ${tokenA}` } });
+    await axios.patch(`${BASE_URL}/api/projects/${projBId}/deploy-settings`,
+      { vercelProjectId: 'prj_proj-b-vercel', renderServiceId: 'srv_proj-b-render' },
+      { headers: { Authorization: `Bearer ${tokenB}` } });
+    log('[+] Projects configured with per-project provider ids');
 
-    // ISOLATION cares about 4xx auth codes, not 2xx/503 provider reachability.)
+    // Step 3: Member access. With per-project ids configured, the member
+    // request returns 200 when the provider is reachable/configured, or 503 if
+    // the provider call itself fails (token missing/unable to reach endpoint).
+    // ISOLATION cares about 4xx auth codes, not 2xx/503 provider reachability.
     log('\n--- STEP 3: Member access on own projects ---');
     const memberARes = await axios.get(`${BASE_URL}/api/deploy-intelligence/vercel/${projAId}`, { headers: { Authorization: `Bearer ${tokenA}` }, validateStatus: () => true });
     const memberBRes = await axios.get(`${BASE_URL}/api/deploy-intelligence/render/${projBId}`, { headers: { Authorization: `Bearer ${tokenB}` }, validateStatus: () => true });
@@ -120,7 +133,7 @@ async function runVerification() {
 
     // Step 7: No token leakage in successful member responses
     log('\n--- STEP 7: Token-leak check ---');
-    const secrets = [process.env.VERCEL_TOKEN || '', process.env.RENDER_API_KEY || '', process.env.BREVO_API_KEY || '']
+    const secrets = [process.env.VERCEL_TOKEN || '', process.env.VERCEL_API_TOKEN || '', process.env.RENDER_API_KEY || '', process.env.BREVO_API_KEY || '']
       .map((s) => s.trim())
       .filter(Boolean);
     const leakCadidates = [memberARes.data, memberBRes.data, memberLogs.data];
@@ -138,6 +151,9 @@ async function runVerification() {
     await axios.post(`${BASE_URL}/api/teams/join`, { inviteCode: sharedTeam.inviteCode }, { headers: { Authorization: `Bearer ${tokenB}` } });
     const sharedProj = await axios.post(`${BASE_URL}/api/projects/create`, { title: 'Deploy Shared Project', description: 'S', teamId: sharedTeam.id }, { headers: { Authorization: `Bearer ${tokenA}` } });
     const sharedProjId = sharedProj.data.project ? sharedProj.data.project.id : sharedProj.data.id;
+    await axios.patch(`${BASE_URL}/api/projects/${sharedProjId}/deploy-settings`,
+      { vercelProjectId: 'prj_shared-vercel', renderServiceId: 'srv_shared-render' },
+      { headers: { Authorization: `Bearer ${tokenA}` } });
 
     const sharedA = await axios.get(`${BASE_URL}/api/deploy-intelligence/render/${sharedProjId}`, { headers: { Authorization: `Bearer ${tokenA}` }, validateStatus: () => true });
     const sharedB = await axios.get(`${BASE_URL}/api/deploy-intelligence/render/${sharedProjId}/logs`, { headers: { Authorization: `Bearer ${tokenB}` }, validateStatus: () => true });

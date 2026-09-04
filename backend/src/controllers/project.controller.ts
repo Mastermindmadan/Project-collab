@@ -172,6 +172,8 @@ export const getProjectSummary = async (req: Request, res: Response) => {
         status: true,
         healthScore: true,
         teamId: true,
+        vercelProjectId: true,
+        renderServiceId: true,
         tasks: {
           select: {
             id: true,
@@ -254,6 +256,67 @@ export const updateProject = async (req: Request, res: Response) => {
     });
 
     res.json({ message: 'Project updated successfully', project: updatedProject });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
+export const updateProjectDeploySettings = async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { projectId } = req.params;
+    // Only the two per-project provider ids may be written here. Account-level
+    // API tokens (VERCEL_API_TOKEN / RENDER_API_KEY) can never be set via this
+    // endpoint — they stay in backend env.
+    const { vercelProjectId, renderServiceId } = req.body;
+
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found.' });
+    }
+
+    // Any team member may configure deployment ids for their project (they do
+    // not reveal provider tokens — only target service ids).
+    const membership = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId: project.teamId } }
+    });
+
+    if (!membership) {
+      return res.status(403).json({ error: 'Access denied. You are not a member of this project.' });
+    }
+
+    const updatedProject = await prisma.project.update({
+      where: { id: projectId },
+      data: {
+        vercelProjectId:
+          vercelProjectId !== undefined
+            ? (typeof vercelProjectId === 'string' && vercelProjectId.trim() ? vercelProjectId.trim() : null)
+            : project.vercelProjectId,
+        renderServiceId:
+          renderServiceId !== undefined
+            ? (typeof renderServiceId === 'string' && renderServiceId.trim() ? renderServiceId.trim() : null)
+            : project.renderServiceId,
+      }
+    });
+
+    await prisma.activityLog.create({
+      data: {
+        userId: authReq.user.id,
+        projectId,
+        action: 'UPDATED_DEPLOY_SETTINGS',
+        metadata: JSON.stringify({
+          vercelConfigured: !!updatedProject.vercelProjectId,
+          renderConfigured: !!updatedProject.renderServiceId
+        })
+      }
+    });
+
+    res.json({ message: 'Deployment settings updated successfully', project: updatedProject });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal Server Error' });

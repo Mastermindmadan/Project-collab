@@ -12,6 +12,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell
 } from 'recharts';
 import DeploymentIntelligence from '../components/DeploymentIntelligence';
+import DeployProviderSettings from '../components/DeployProviderSettings';
 
 interface Project {
   id: string;
@@ -1443,6 +1444,11 @@ export default function Projects() {
                   </div>
                 </form>
               </div>
+            )}
+
+            {/* VIEW 6b: DEPLOYMENT PROVIDER SETTINGS (per-project Vercel/Render ids) */}
+            {activeTab === 'settings' && (
+              <DeployProviderSettings projectId={selectedProject.id} />
             )}
           </div>
         </div>

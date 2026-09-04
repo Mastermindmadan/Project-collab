@@ -96,19 +96,31 @@ const vercelProject = {
 };
 
 // ─── Render deploys + events (v1) ──────────────────────────────────────────
+// The real Render API wraps every list entry in a cursor envelope:
+// [{ "deploy": {...}, "cursor": "..." }] / [{ "event": {...}, "cursor": "..." }].
+const renderService = {
+  id: 'srv_dummy-render-service',
+  name: 'project-collab',
+  branch: 'main',
+  ownerId: 'tea_dummy-render-owner',
+  type: 'web_service',
+  suspended: 'not_suspended',
+  serviceDetails: { url: 'https://project-collab.onrender.com' },
+};
+
 const renderDeploys = [
-  { id: 'dep_live_1', status: 'live', createdAt: iso(now - 3600_000 * 26), finishedAt: iso(now - 3600_000 * 26 + 95_000), commit: { id: '9f4c2ab1d7e08f3a5b6c7d8e9f0a1b2c3d4e5f60', branch: 'main', message: 'feat: add deployment intelligence' } },
-  { id: 'dep_build_1', status: 'build_in_progress', createdAt: iso(now - 3600_000 * 2), finishedAt: null, commit: { id: 'aabbccddeeff00112233445566778899aabbccdd', branch: 'main', message: 'fix: render log pagination' } },
-  { id: 'dep_failed_1', status: 'deploy_failed', createdAt: iso(now - 3600_000 * 50), finishedAt: iso(now - 3600_000 * 50 + 31_000), commit: { id: '1111222233334444555566667777888899990000', branch: 'feature/render-events' } },
-  { id: 'dep_cancel_1', status: 'canceled', createdAt: iso(now - 3600_000 * 74), finishedAt: iso(now - 3600_000 * 74 + 20_000), commit: { id: '9999aaaabbbbccc0ddddeeeeffff000011112222', branch: 'main', message: 'build: bump deps' } },
-  { id: 'dep_no_commit', status: 'live', createdAt: iso(now - 3600_000 * 98), finishedAt: iso(now - 3600_000 * 98 + 60_000), commit: {} },
+  { deploy: { id: 'dep_live_1', status: 'live', createdAt: iso(now - 3600_000 * 26), finishedAt: iso(now - 3600_000 * 26 + 95_000), commit: { id: '9f4c2ab1d7e08f3a5b6c7d8e9f0a1b2c3d4e5f60', branch: 'main', message: 'feat: add deployment intelligence' } }, cursor: 'c1' },
+  { deploy: { id: 'dep_build_1', status: 'build_in_progress', createdAt: iso(now - 3600_000 * 2), finishedAt: null, commit: { id: 'aabbccddeeff00112233445566778899aabbccdd', branch: 'main', message: 'fix: render log pagination' } }, cursor: 'c2' },
+  { deploy: { id: 'dep_failed_1', status: 'deploy_failed', createdAt: iso(now - 3600_000 * 50), finishedAt: iso(now - 3600_000 * 50 + 31_000), commit: { id: '1111222233334444555566667777888899990000', branch: 'feature/render-events' } }, cursor: 'c3' },
+  { deploy: { id: 'dep_cancel_1', status: 'canceled', createdAt: iso(now - 3600_000 * 74), finishedAt: iso(now - 3600_000 * 74 + 20_000), commit: { id: '9999aaaabbbbccc0ddddeeeeffff000011112222', branch: 'main', message: 'build: bump deps' } }, cursor: 'c4' },
+  { deploy: { id: 'dep_no_commit', status: 'live', createdAt: iso(now - 3600_000 * 98), finishedAt: iso(now - 3600_000 * 98 + 60_000), commit: {} }, cursor: 'c5' },
 ];
 
 const renderEvents = [
-  { id: 'evt_1', type: 'service.updated', timestamp: iso(now - 3600_000 * 26), details: 'Deploy completed successfully' },
-  { id: 'evt_2', type: 'instance.created', timestamp: iso(now - 3600_000 * 26), details: 'Instance web-1 started' },
-  { id: 'evt_3', type: 'service.updated', timestamp: iso(now - 3600_000 * 2), details: 'Deploy started' },
-  { id: 'evt_no_details', type: 'deploy', timestamp: iso(now - 3600_000), details: undefined },
+  { event: { id: 'evt_1', type: 'service.updated', timestamp: iso(now - 3600_000 * 26), details: 'Deploy completed successfully' }, cursor: 'e1' },
+  { event: { id: 'evt_2', type: 'instance.created', timestamp: iso(now - 3600_000 * 26), details: 'Instance web-1 started' }, cursor: 'e2' },
+  { event: { id: 'evt_3', type: 'service.updated', timestamp: iso(now - 3600_000 * 2), details: 'Deploy started' }, cursor: 'e3' },
+  { event: { id: 'evt_no_details', type: 'deploy', timestamp: iso(now - 3600_000), details: undefined }, cursor: 'e4' },
 ];
 
 // ─── HTTP server ───────────────────────────────────────────────────────────
@@ -150,19 +162,49 @@ const server = http.createServer((req, res) => {
     bump('vercel.projects');
     return send(200, vercelProject);
   }
-  if (path.startsWith('/v1/services/') && path.endsWith('/deploys') && req.method === 'GET') {
-    bump('render.deploys');
-    return send(200, renderDeploys);
+  // Render deploys/events come from the service-owned object as a cursor
+  // envelope — exactly like the real API. Only serve them for a known service.
+  const isRenderService = path.startsWith('/v1/services/');
+  if (isRenderService && req.method === 'GET') {
+    const rest = path.replace('/v1/services/', '');
+    const m = rest.match(/^([^/]+)(\/.*)?$/);
+    const svcId = m ? m[1] : '';
+    const sub = m ? m[2] || '' : '';
+    if (svcId !== renderService.id) return send(404, { message: 'Service not found' });
+    if (sub === '/deploys') {
+      bump('render.deploys');
+      return send(200, renderDeploys);
+    }
+    if (sub === '/events') {
+      bump('render.events');
+      return send(200, renderEvents);
+    }
+    if (sub === '') {
+      bump('render.service');
+      return send(200, renderService);
+    }
+    // /logs intentionally NOT served here — the real API has no such path;
+    // logs live at the top-level /v1/logs endpoint.
   }
-  if (path.startsWith('/v1/services/') && path.endsWith('/events') && req.method === 'GET') {
-    bump('render.events');
-    return send(200, renderEvents);
-  }
-  if (path.startsWith('/v1/services/') && path.endsWith('/logs') && req.method === 'GET') {
+
+  // ─── Render logs (top-level /v1/logs — matches the real Render API) ──────
+  if (path === '/v1/logs' && req.method === 'GET') {
     bump('render.logs');
-    const limit = Math.min(200, Number(query.get('limit') || 100));
-    const offset = Math.max(0, Number(query.get('offset') || 0));
-    return send(200, renderLogs.slice(offset, offset + limit));
+    const resource = query.get('resource') || '';
+    if (resource !== renderService.id) return send(404, { message: 'Resource not found' });
+    const limit = Math.min(100, Number(query.get('limit') || 20));
+    const endTime = query.get('endTime');
+    let slice = renderLogs;
+    if (endTime) slice = renderLogs.filter((l: any) => l.timestamp < endTime);
+    const page = slice.slice(0, limit);
+    const hasMore = slice.length > limit;
+    const oldest = page.length ? page[page.length - 1].timestamp : renderLogs[renderLogs.length - 1].timestamp;
+    return send(200, {
+      logs: page,
+      hasMore,
+      nextStartTime: renderLogs[0].timestamp,
+      nextEndTime: oldest,
+    });
   }
   return send(404, { message: 'Not found in mock' });
 });
@@ -173,10 +215,16 @@ server.listen(PORT, () => {
   console.log(`[MOCK] ${vercelDeployments.length} vercel deploys, ${renderDeploys.length} render deploys, ${renderLogs.length} log lines`);
 });
 // ─── Render logs (returned ASCENDING — service must sort newest first) ─────
+// Real /v1/logs entries carry `id`, `labels[]`, `message`, `timestamp`.
 const LOG_COUNT = 250;
 const renderLogs = Array.from({ length: LOG_COUNT }, (_, i) => ({
   id: `log_${LOG_COUNT - 1 - i}`,
+  labels: [
+    { name: 'resource', value: renderService.id },
+    { name: 'instance', value: `${renderService.id}-mock` },
+    { name: 'level', value: i % 13 === 0 ? 'error' : 'info' },
+    { name: 'type', value: 'app' },
+  ],
   message: i === 0 ? '[INFO] Server started listening on port 5000' : `[DEPLOY INTELLIGENCE] synthetic log line ${i} for E2E verification`,
-  type: i % 13 === 0 ? 'error' : 'log',
-  updatedAt: iso(now - i * 60_000),
+  timestamp: iso(now - i * 60_000),
 }));

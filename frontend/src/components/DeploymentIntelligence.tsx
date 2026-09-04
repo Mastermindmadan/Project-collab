@@ -81,10 +81,23 @@ export default function DeploymentIntelligence({ projectId }: DeploymentIntellig
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Per-provider failure messages. A 404 means the project has no provider id
+  // configured yet ("Deployment not configured for this project") — shown as a
+  // per-panel notice instead of failing silently.
+  const [vercelError, setVercelError] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const toggleLogs = () => setLogsOpen((open) => !open);
+
+  const providerError = (reason: any, provider: 'Vercel' | 'Render'): string => {
+    const status = reason?.response?.status;
+    const backendMessage = reason?.response?.data?.error;
+    if (status === 404) return backendMessage || `Deployment not configured for this project.`;
+    if (status === 403) return backendMessage || "Access denied. You are not a member of this project's team.";
+    return backendMessage || `${provider} deployment data is unavailable right now.`;
+  };
 
   const fetchAll = useCallback(
     async (silent = false) => {
@@ -95,14 +108,18 @@ export default function DeploymentIntelligence({ projectId }: DeploymentIntellig
         if (!silent) setLoading(true);
         setRefreshing(true);
         setError(null);
+        setVercelError(null);
+        setRenderError(null);
         const [v, r] = await Promise.allSettled([
           api.get(`/deploy-intelligence/vercel/${projectId}`),
           api.get(`/deploy-intelligence/render/${projectId}`),
         ]);
         setVercel(v.status === 'fulfilled' ? v.value.data : null);
         setRender(r.status === 'fulfilled' ? r.value.data : null);
+        if (v.status === 'rejected') setVercelError(providerError(v.reason, 'Vercel'));
+        if (r.status === 'rejected') setRenderError(providerError(r.reason, 'Render'));
         if (v.status === 'rejected' && r.status === 'rejected') {
-          setError('Deployment Intelligence is unavailable right now.');
+          setError(null); // per-provider notices already cover both panels
         }
         setLastUpdated(new Date());
       } catch {
@@ -130,10 +147,16 @@ export default function DeploymentIntelligence({ projectId }: DeploymentIntellig
             : { ...data, logs: [...(prev.logs || []), ...(data.logs || [])] }
         );
       } catch (err: any) {
+        const status = err.response?.status;
         setLogs((prev: any) =>
           prev
             ? prev
-            : { logs: [], message: err.response?.data?.error || 'Failed to load logs.', configured: true }
+            : {
+                logs: [],
+                message: err.response?.data?.error || 'Failed to load logs.',
+                // 404 = this project has no Render Service ID configured yet.
+                configured: status !== 404,
+              }
         );
       } finally {
         setLogsLoading(false);
@@ -210,7 +233,7 @@ export default function DeploymentIntelligence({ projectId }: DeploymentIntellig
         ) : message && logLines.length === 0 ? (
           <p className="text-xs text-amber-400/90 flex items-center gap-2 py-3">
             <AlertTriangle className="w-4 h-4" /> {message}
-            {configured === false && <span className="text-slate-500">— add RENDER_API_KEY / RENDER_SERVICE_ID to enable logs.</span>}
+            {configured === false && <span className="text-slate-500">— set this project's Render Service ID in Project Settings to enable logs.</span>}
           </p>
         ) : logLines.length === 0 ? (
           <p className="text-xs text-slate-500 py-4">No log lines returned by Render.</p>
@@ -271,7 +294,12 @@ return (
               <h4 className="text-sm font-bold text-white">Vercel</h4>
               {vercel?.configured === false && <span className="text-[10px] text-amber-400">not configured</span>}
             </div>
-            {vercel?.message ? (
+            {vercelError ? (
+              <p className="text-[11px] text-amber-400/90 flex items-start gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /> {vercelError}
+                <span className="text-slate-500">— set a Vercel Project ID in Project Settings.</span>
+              </p>
+            ) : vercel?.message ? (
               <p className="text-[11px] text-amber-400/90 flex items-start gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /> {vercel.message}
               </p>
@@ -322,7 +350,12 @@ return (
               <h4 className="text-sm font-bold text-white">Render</h4>
               {render?.configured === false && <span className="text-[10px] text-amber-400">not configured</span>}
             </div>
-            {render?.message ? (
+            {renderError ? (
+              <p className="text-[11px] text-amber-400/90 flex items-start gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /> {renderError}
+                <span className="text-slate-500">— set a Render Service ID in Project Settings.</span>
+              </p>
+            ) : render?.message ? (
               <p className="text-[11px] text-amber-400/90 flex items-start gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /> {render.message}
               </p>
