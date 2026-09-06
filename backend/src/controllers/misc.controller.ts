@@ -83,8 +83,11 @@ export const getActiveSessions = async (req: Request, res: Response) => {
 
     const online = getOnlineUsersSnapshot();
 
-    // Enrich each online user with database-backed profile fields.
-    const userIds = online.map((u) => u.userId);
+    // Filter to only the current user's sessions
+    const mySessions = online.filter((u) => u.userId === authReq.user!.id);
+
+    // Enrich each session with database-backed profile fields.
+    const userIds = mySessions.map((u) => u.userId);
     const profiles = userIds.length
       ? await prisma.user.findMany({
           where: { id: { in: userIds } },
@@ -94,7 +97,7 @@ export const getActiveSessions = async (req: Request, res: Response) => {
 
     const profileMap = new Map(profiles.map((p) => [p.id, p]));
 
-    const sessions = online.map((u) => {
+    const sessions = mySessions.map((u) => {
       const profile = profileMap.get(u.userId);
       return {
         id: `${u.userId}-${u.lastActive.getTime()}`,
@@ -104,7 +107,7 @@ export const getActiveSessions = async (req: Request, res: Response) => {
         avatarUrl: profile?.avatarUrl || null,
         device: 'Browser',
         location: 'Current session',
-        current: u.userId === authReq.user!.id,
+        current: true,
         lastActive: u.lastActive,
       };
     });

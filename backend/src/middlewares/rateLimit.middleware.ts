@@ -5,7 +5,7 @@ import { AuthenticatedRequest } from './auth.middleware';
 /** Brute-force protection for login and password-reset flows. */
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: Number(process.env.AUTH_RATE_LIMIT_MAX || 5),
   standardHeaders: true,
   legacyHeaders: false,
   handler: (_req, res) => {
@@ -36,7 +36,7 @@ export const otpRequestRateLimiter = rateLimit({
  */
 export const geminiRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 15,
+  max: Number(process.env.GEMINI_RATE_LIMIT_MAX || 15),
   standardHeaders: true,
   legacyHeaders: false,
   // Only supply a custom key when we have a real user ID.

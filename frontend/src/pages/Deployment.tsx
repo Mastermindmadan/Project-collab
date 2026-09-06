@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Rocket, Loader2, FolderOpen, Server, ExternalLink, Settings2 } from 'lucide-react';
 import api from '../utils/api';
 import { useAuthStore } from '../store/auth.store';
@@ -22,13 +22,17 @@ export default function Deployment() {
   const accessToken = useAuthStore((s) => s.accessToken);
 
   // ── Load projects on mount / account switch ──────────────────────────────
+  const hasLoadedRef = useRef(false);
   useEffect(() => {
-    // On account switch or logout, clear all cached Deployment Intelligence
-    // state so the previous account's deploy data is never visible to the
-    // next account (mirrors the GitHub page isolation fix).
-    setProjects([]);
-    setSelectedProjectId('');
-    setError(null);
+    // Only clear cached state on the very first load or on logout.
+    // On subsequent re-renders (e.g. tab refocus causing a transient store
+    // update), keep showing the last-loaded data until the new fetch
+    // completes — prevents the blank-page flash.
+    if (!hasLoadedRef.current || !accessToken) {
+      setProjects([]);
+      setSelectedProjectId('');
+      setError(null);
+    }
 
     if (!accessToken) {
       setLoadingProjects(false);
@@ -47,6 +51,7 @@ export default function Deployment() {
           });
         });
         setProjects(allProjects);
+        hasLoadedRef.current = true;
 
         // Restore last-used project from localStorage (scoped to this account)
         const lastPid = localStorage.getItem(`pcai-deploy-project-${currentUserId}`);

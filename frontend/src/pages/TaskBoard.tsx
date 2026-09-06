@@ -3,6 +3,7 @@ import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import type { DropResult } from '@hello-pangea/dnd';
 import { Link } from 'react-router-dom';
 import api from '../utils/api';
+import { useAuthStore } from '../store/auth.store';
 import {
   CheckSquare, Plus, Search, Filter, Clock, User,
   MoreVertical, Loader2, X, MessageSquare, Send, Trash2, ShieldAlert, CheckCircle, AlertCircle
@@ -399,6 +400,12 @@ export default function TaskBoard() {
   // Project team members list
   const projectMembers = selectedProjectDetails?.team?.members || [];
 
+  // Current user and their role on this project (for status-change permission)
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const currentUserRole = projectMembers.find((m: any) => m.user.id === currentUserId)?.role;
+  const canUserChangeStatus = (task: Task) =>
+    task.assigneeId === currentUserId || currentUserRole === 'ADMIN' || currentUserRole === 'OWNER';
+
   return (
     <div className="space-y-8">
       {/* Global Toast Notification */}
@@ -425,7 +432,7 @@ export default function TaskBoard() {
           <p className="text-slate-400 text-sm mb-1 flex items-center gap-1.5">
             <CheckSquare className="w-3.5 h-3.5" /> Workspace Taskboard
           </p>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">Kanban Board</h1>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">Tasks</h1>
           <p className="text-slate-500 text-sm mt-1">Manage, allocate, and cycle project tasks inside drag-and-drop columns.</p>
         </div>
 
@@ -467,7 +474,7 @@ export default function TaskBoard() {
       {loading ? (
         <div className="glass-panel rounded-2xl p-16 text-center flex flex-col items-center justify-center gap-3">
           <Loader2 className="w-10 h-10 text-primary animate-spin" />
-          <p className="text-sm text-slate-400">Loading Kanban workspaces...</p>
+          <p className="text-sm text-slate-400">Loading task workspaces...</p>
         </div>
       ) : projects.length === 0 ? (
         <div className="glass-panel rounded-2xl p-16 text-center">
@@ -556,20 +563,24 @@ export default function TaskBoard() {
                           snapshot.isDraggingOver ? 'bg-primary/5 border border-dashed border-primary/25' : ''
                         }`}
                       >
-                        {column.tasks.map((task, index) => {
+                                                {column.tasks.map((task, index) => {
                           const priority = priorityConfig[task.priority] || priorityConfig.LOW;
                           const doneSub = task.oldSubtasks.filter(s => s.isCompleted).length;
                           const totalSub = task.oldSubtasks.length;
+                          const canChangeStatus = canUserChangeStatus(task);
 
                           return (
-                            <Draggable key={task.id} draggableId={task.id} index={index}>
+                            <Draggable key={task.id} draggableId={task.id} index={index} isDragDisabled={!canChangeStatus}>
                               {(dragProv, dragSnap) => (
                                 <div
                                   ref={dragProv.innerRef}
                                   {...dragProv.draggableProps}
                                   {...dragProv.dragHandleProps}
                                   onClick={() => setActiveTask(task)}
-                                  className={`glass-card rounded-xl p-4 cursor-grab active:cursor-grabbing hover:border-slate-700 transition-all ${
+                                  title={canChangeStatus ? undefined : 'Only the assignee or project admins can change this task\'s status'}
+                                  className={`glass-card rounded-xl p-4 transition-all ${
+                                    canChangeStatus ? 'cursor-grab active:cursor-grabbing hover:border-slate-700' : 'cursor-default opacity-80'
+                                  } ${
                                     dragSnap.isDragging ? 'shadow-2xl shadow-primary/20 scale-[1.02] rotate-1 border-primary/45 bg-slate-900' : ''
                                   }`}
                                 >

@@ -110,6 +110,15 @@ export const updateTask = async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Access denied.' });
     }
 
+    // Restrict status changes to the task's assignee and project admins/owners
+    if (status !== undefined && status !== task.status) {
+      const isAssignee = task.assigneeId === authReq.user.id;
+      const isAdminOrOwner = membership.role === 'ADMIN' || membership.role === 'OWNER';
+      if (!isAssignee && !isAdminOrOwner) {
+        return res.status(403).json({ error: 'Only the assignee or project admins can change task status.' });
+      }
+    }
+
     const previousStatus = task.status;
     const previousAssigneeId = task.assigneeId;
 

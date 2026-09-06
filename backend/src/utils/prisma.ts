@@ -18,6 +18,7 @@ const RETRYABLE_CODES: ReadonlySet<string> = new Set([
   'P1003', // Database does not exist (harmless to retry only transiently)
   'P1008', // Operations timed out
   'P1011', // Connection closed by the server (TLS/disconnect) — read-only retry
+  'P2024', // Connection pool timeout / pooler saturated (e.g. Supabase free-tier pooler limit) — transient, retryable
 ]);
 
 const RETRYABLE_MESSAGE_FRAGMENTS: ReadonlyArray<string> = [

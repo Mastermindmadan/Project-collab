@@ -505,7 +505,8 @@ export default function Projects() {
         completedTasks: completedTasksList,
         pendingTasks: pendingTasksList,
         commitStats: `Total of ${selectedProject.gitAnalytics?.commitsCount || 0} commits parsed. Last active: ${selectedProject.gitAnalytics?.lastCommitTime || 'N/A'}`,
-        blockages: pendingTasksList.slice(0, 2) // assume first 2 pending are blockers for simple mock
+        blockages: pendingTasksList.slice(0, 2), // assume first 2 pending are blockers for simple mock
+        projectId: selectedProject.id
       });
       setSprintSummary(res.data.summary);
     } catch (err) {
@@ -1228,7 +1229,7 @@ export default function Projects() {
                         <div className="space-y-3">
                           {[
                             { author: 'Priya Mehta', hash: 'e4a2d8b', msg: 'feat: add JWT auth middlewares and schemas', time: '1h ago' },
-                            { author: 'Arjun Verma', hash: 'b12c9f0', msg: 'fix: resolve Kanban column drag alignment issues', time: '4h ago' },
+                            { author: 'Arjun Verma', hash: 'b12c9f0', msg: 'fix: resolve Tasks column drag alignment issues', time: '4h ago' },
                             { author: 'Priya Mehta', hash: 'c78e1b2', msg: 'docs: document API auth flow in readme', time: '1d ago' },
                             { author: 'Sneha Kapoor', hash: 'f5d3e8a', msg: 'test: write controller authentication unit tests', time: '2d ago' },
                           ].map((commit, idx) => (

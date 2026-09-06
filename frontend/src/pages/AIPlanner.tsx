@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Zap, FileText, AlertTriangle, BarChart3, Brain, Loader2,
   CheckCircle2, ChevronRight, Sparkles, Clock, Target, AlertCircle, RefreshCw,
@@ -54,6 +54,10 @@ export default function AIPlanner() {
   const [teamSize, setTeamSize] = useState('4');
   const [duration, setDuration] = useState('12 weeks');
 
+  // Real project data for sprint summary
+  const [projects, setProjects] = useState<any[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+
   // Requirement Analyzer Inputs
   const [reqDocText, setReqDocText] = useState('Project Title: AI Research Collaboration Platform\nGoal: Build a high-performance web app for research collaboration.\nSecurity Requirements: JWT authentication, TLS encryption, RBAC authorization.\nFeatures: Real-time chat via Socket.io, GitHub integration, AI roadmap generator.\nDatabase: PostgreSQL with Prisma ORM.');
 
@@ -62,6 +66,30 @@ export default function AIPlanner() {
   const [analyzerResult, setAnalyzerResult] = useState<any>(null);
   const [riskResult, setRiskResult] = useState<any>(null);
   const [sprintResult, setSprintResult] = useState<any>(null);
+
+  // Load user's projects on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.get('/teams/my-teams');
+        const teams = res.data.teams || [];
+        const allProjects: any[] = [];
+        teams.forEach((t: any) => {
+          if (t.projects) {
+            t.projects.forEach((p: any) => {
+              allProjects.push(p);
+            });
+          }
+        });
+        setProjects(allProjects);
+        if (allProjects.length > 0) {
+          setSelectedProjectId(allProjects[0].id);
+        }
+      } catch (err) {
+        console.error('Failed to load projects for AI Planner', err);
+      }
+    })();
+  }, []);
 
   const runAnalysis = async () => {
     setLoading(true);
@@ -93,11 +121,32 @@ export default function AIPlanner() {
       };
     } else if (activeTool === 'sprint') {
       endpoint = '/ai/sprint-summary';
+      // Fetch real task data for the selected project
+      let completedTasks: string[] = [];
+      let pendingTasks: string[] = [];
+      let commitStats = 'No commit data available';
+      let blockages: string[] = [];
+      if (selectedProjectId) {
+        try {
+          const projRes = await api.get(`/projects/${selectedProjectId}`);
+          const project = projRes.data.project;
+          const tasks = project.tasks || [];
+          completedTasks = tasks.filter((t: any) => t.status === 'COMPLETED').map((t: any) => t.title);
+          pendingTasks = tasks.filter((t: any) => t.status !== 'COMPLETED').map((t: any) => t.title);
+          const overdue = tasks.filter((t: any) => t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'COMPLETED');
+          if (overdue.length > 0) blockages = overdue.map((t: any) => `Overdue: ${t.title}`);
+          const git = project.gitAnalytics;
+          if (git?.commitsCount) commitStats = `${git.commitsCount} commits recorded`;
+        } catch (err) {
+          console.error('Failed to fetch project tasks for sprint summary', err);
+        }
+      }
       payload = {
-        completedTasks: ['Authentication endpoints', 'Prisma DB migration schema', 'Kanban drag-and-drop board'],
-        pendingTasks: ['Socket.io chat integration', 'Unit tests execution', 'Cloud deployment script'],
-        commitStats: '28 commits by 4 contributors this week',
-        blockages: ['Third-party API OAuth key configuration']
+        completedTasks,
+        pendingTasks,
+        commitStats,
+        blockages,
+        projectId: selectedProjectId || undefined
       };
     }
 
@@ -302,8 +351,17 @@ export default function AIPlanner() {
             </div>
           )}
 
-          {activeTool === 'sprint' && (
+                    {activeTool === 'sprint' && (
             <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1.5">Project</label>
+                <select value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)} className="glass-input w-full text-sm">
+                  {projects.length === 0 && <option value="">No projects available</option>}
+                  {projects.map((p: any) => (
+                    <option key={p.id} value={p.id}>{p.title}</option>
+                  ))}
+                </select>
+              </div>
               <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl space-y-2">
                 <p className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
                   <BarChart3 className="w-4 h-4" /> Live Sprint Parameters

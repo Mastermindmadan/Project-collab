@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
   Settings, Bell, Shield, Palette, Globe, Trash2, Save, ToggleLeft, ToggleRight,
-  Eye, EyeOff, LogOut, Key, Smartphone, User, Github, Linkedin, Phone,
-  CheckCircle2, Loader2, ExternalLink, Code2, Cpu, RefreshCw, AlertTriangle,
+  Eye, EyeOff, LogOut, Key, User, Github,
+  CheckCircle2, Loader2, ExternalLink, Code2, Cpu, RefreshCw, AlertTriangle
 } from 'lucide-react';
 
 
@@ -48,7 +48,6 @@ const GITHUB_REGEX = /^(?!.*--)[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/;
 
 export default function AppSettings() {
   const navigate = useNavigate();
-  const storeUser = useAuthStore((s) => s.user);
   const updateUser = useAuthStore((s) => s.updateUser);
   const logout = useAuthStore((s) => s.logout);
 
@@ -69,10 +68,7 @@ export default function AppSettings() {
     name: '',
     bio: '',
     github: '',
-    linkedin: '',
-    phone: '',
     githubUsername: '',
-    avatarUrl: '',
   });
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
 
@@ -144,10 +140,7 @@ export default function AppSettings() {
           name: u.name || '',
           bio: u.bio || '',
           github: u.github || '',
-          linkedin: u.linkedin || '',
-          phone: u.phone || '',
           githubUsername: u.githubUsername || '',
-          avatarUrl: u.avatarUrl || '',
         });
         const raw = u.skills;
         if (Array.isArray(raw)) setSelectedSkills(raw);
@@ -182,9 +175,6 @@ export default function AppSettings() {
         name: profileForm.name,
         bio: profileForm.bio,
         github: profileForm.github,
-        linkedin: profileForm.linkedin,
-        phone: profileForm.phone,
-        avatarUrl: profileForm.avatarUrl || undefined,
         githubUsername: cleanGithubUsername || null,
         skills: selectedSkills,
       });
@@ -201,10 +191,7 @@ export default function AppSettings() {
         name: updated.name || f.name,
         bio: updated.bio || '',
         github: updated.github || '',
-        linkedin: updated.linkedin || '',
-        phone: updated.phone || '',
         githubUsername: updated.githubUsername || '',
-        avatarUrl: updated.avatarUrl || '',
       }));
 
       setProfileSaved(true);
@@ -339,25 +326,6 @@ export default function AppSettings() {
                 </div>
               ) : (
                 <div className="space-y-5">
-                  {/* Avatar preview */}
-                  <div className="flex items-center gap-4">
-                    <div className="w-16 h-16 rounded-2xl bg-primary/20 flex items-center justify-center text-2xl font-extrabold text-white overflow-hidden">
-                      {profileForm.avatarUrl
-                        ? <img src={profileForm.avatarUrl} alt="avatar" className="w-full h-full object-cover" />
-                        : (profileForm.name || storeUser?.name || 'U').charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex-1">
-                      <label className="block text-xs text-slate-400 mb-1.5 font-semibold">Avatar URL</label>
-                      <input
-                        type="url"
-                        value={profileForm.avatarUrl}
-                        onChange={(e) => setProfileForm((f) => ({ ...f, avatarUrl: e.target.value }))}
-                        placeholder="https://…/your-avatar.png"
-                        className={inputCls}
-                      />
-                    </div>
-                  </div>
-
                   {/* Name & Bio */}
                   <div className="grid grid-cols-1 gap-4">
                     <div>
@@ -382,32 +350,8 @@ export default function AppSettings() {
                     </div>
                   </div>
 
-                  {/* Contact fields */}
+                  {/* GitHub fields */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1.5 font-semibold flex items-center gap-1">
-                        <Phone className="w-3 h-3" /> Phone
-                      </label>
-                      <input
-                        type="tel"
-                        value={profileForm.phone}
-                        onChange={(e) => setProfileForm((f) => ({ ...f, phone: e.target.value }))}
-                        placeholder="+1 234 567 8900"
-                        className={inputCls}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1.5 font-semibold flex items-center gap-1">
-                        <Linkedin className="w-3 h-3" /> LinkedIn
-                      </label>
-                      <input
-                        type="text"
-                        value={profileForm.linkedin}
-                        onChange={(e) => setProfileForm((f) => ({ ...f, linkedin: e.target.value }))}
-                        placeholder="linkedin.com/in/username"
-                        className={inputCls}
-                      />
-                    </div>
                     <div>
                       <label className="block text-xs text-slate-400 mb-1.5 font-semibold flex items-center gap-1">
                         <Github className="w-3 h-3" /> GitHub Profile URL
@@ -724,18 +668,6 @@ export default function AppSettings() {
                 </button>
               </div>
               <div className="h-px bg-slate-800" />
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-white flex items-center gap-2">
-                    <Smartphone className="w-4 h-4 text-emerald-400" /> Two-Factor Authentication
-                  </p>
-                  <p className="text-xs text-slate-500 mt-1">Add an extra layer of security to your account</p>
-                </div>
-                <button className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm rounded-xl hover:bg-emerald-500/20 transition-all">
-                  Enable 2FA
-                </button>
-              </div>
-              <div className="h-px bg-slate-800" />
               <div>
                 <p className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
                   <Globe className="w-4 h-4 text-blue-400" /> Active Sessions
@@ -791,7 +723,6 @@ export default function AppSettings() {
               </h2>
               <div className="space-y-3">
                 {[
-                  { label: 'Export Account Data', desc: 'Download all your project data as JSON', action: 'Export', color: 'bg-blue-500/10 border-blue-500/20 text-blue-400 hover:bg-blue-500/20' },
                   { label: 'Disconnect GitHub', desc: 'Remove the GitHub integration from your account', action: 'Disconnect', color: 'bg-amber-500/10 border-amber-500/20 text-amber-400 hover:bg-amber-500/20' },
                 ].map((item) => (
                   <div key={item.label} className="flex items-center justify-between p-4 glass-card rounded-xl">
