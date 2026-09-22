@@ -3,6 +3,8 @@ import {
   getNotifications,
   markNotificationRead,
   markNotificationsRead,
+  deleteNotification,
+  clearAllNotifications,
   getProjectActivityFeed,
   createMeeting,
   getActiveSessions,
@@ -19,6 +21,8 @@ router.get('/notifications', getNotifications);
 router.patch('/notifications/mark-read', markNotificationsRead);
 router.put('/notifications/mark-all-read', markNotificationsRead);
 router.put('/notifications/:id/read', markNotificationRead);
+router.delete('/notifications/:id', deleteNotification);
+router.delete('/notifications', clearAllNotifications);
 
 // Deadlines
 router.get('/deadlines', getUpcomingDeadlines);

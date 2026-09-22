@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useAuthStore } from './store/auth.store';
 import SidebarLayout from './layouts/SidebarLayout';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Fallback loader for code-split route chunks
 const PageLoader = () => (
@@ -63,53 +64,55 @@ export default function App() {
   return (
     <BrowserRouter>
       <Toaster position="top-center" theme="dark" richColors toastOptions={{ style: { fontSize: '0.85rem', fontFamily: 'Inter, sans-serif' } }} />
-      <Suspense fallback={<PageLoader />}>
-        <Routes>
-          {/* Public auth routes */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="/otp-verification" element={<OtpVerification />} />
-          <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/invite/:code" element={<InviteHandler />} />
-          <Route path="/join/:code" element={<InviteHandler />} />
+      <ErrorBoundary>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            {/* Public auth routes */}
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/otp-verification" element={<OtpVerification />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/invite/:code" element={<InviteHandler />} />
+            <Route path="/join/:code" element={<InviteHandler />} />
 
-          {/* Protected workspace routes */}
-          <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
-          <Route path="/analytics/members" element={<ProtectedRoute><MemberAnalytics /></ProtectedRoute>} />
-          <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+            {/* Protected workspace routes */}
+            <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+            <Route path="/analytics/members" element={<ProtectedRoute><MemberAnalytics /></ProtectedRoute>} />
+            <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
 
-          {/* Collaboration */}
-          <Route path="/teams" element={<ProtectedRoute><Teams /></ProtectedRoute>} />
-          <Route path="/projects" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
-          <Route path="/projects/:id" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
-          <Route path="/tasks" element={<ProtectedRoute><TaskBoard /></ProtectedRoute>} />
-          <Route path="/my-tasks" element={<ProtectedRoute><TaskBoard defaultView="MY_TASKS" /></ProtectedRoute>} />
-          <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
-          <Route path="/meetings" element={<ProtectedRoute><Meetings /></ProtectedRoute>} />
-          <Route path="/calendar" element={<ProtectedRoute><Calendar /></ProtectedRoute>} />
-          <Route path="/drive" element={<ProtectedRoute><Drive /></ProtectedRoute>} />
-          <Route path="/documents" element={<ProtectedRoute><Drive /></ProtectedRoute>} />
+            {/* Collaboration */}
+            <Route path="/teams" element={<ProtectedRoute><Teams /></ProtectedRoute>} />
+            <Route path="/projects" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
+            <Route path="/projects/:id" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
+            <Route path="/tasks" element={<ProtectedRoute><TaskBoard /></ProtectedRoute>} />
+            <Route path="/my-tasks" element={<ProtectedRoute><TaskBoard defaultView="MY_TASKS" /></ProtectedRoute>} />
+            <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+            <Route path="/meetings" element={<ProtectedRoute><Meetings /></ProtectedRoute>} />
+            <Route path="/calendar" element={<ProtectedRoute><Calendar /></ProtectedRoute>} />
+            <Route path="/drive" element={<ProtectedRoute><Drive /></ProtectedRoute>} />
+            <Route path="/documents" element={<ProtectedRoute><Drive /></ProtectedRoute>} />
 
-          {/* Intelligence */}
-          <Route path="/ai" element={<ProtectedRoute><AIPlanner /></ProtectedRoute>} />
-          <Route path="/ai-pm" element={<ProtectedRoute><AIProjectManager /></ProtectedRoute>} />
-          <Route path="/intelligence" element={<ProtectedRoute><AIProjectManager /></ProtectedRoute>} />
-          <Route path="/github" element={<ProtectedRoute><GitHub /></ProtectedRoute>} />
-          <Route path="/deploy" element={<ProtectedRoute><Deployment /></ProtectedRoute>} />
+            {/* Intelligence */}
+            <Route path="/ai" element={<ProtectedRoute><AIPlanner /></ProtectedRoute>} />
+            <Route path="/ai-pm" element={<ProtectedRoute><AIProjectManager /></ProtectedRoute>} />
+            <Route path="/intelligence" element={<ProtectedRoute><AIProjectManager /></ProtectedRoute>} />
+            <Route path="/github" element={<ProtectedRoute><GitHub /></ProtectedRoute>} />
+            <Route path="/deploy" element={<ProtectedRoute><Deployment /></ProtectedRoute>} />
 
-          {/* Reports */}
-          <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+            {/* Reports */}
+            <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
 
-          {/* Account */}
-          <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-          <Route path="/settings" element={<ProtectedRoute><AppSettings /></ProtectedRoute>} />
+            {/* Account */}
+            <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><AppSettings /></ProtectedRoute>} />
 
-          {/* Fallback redirect */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Suspense>
+            {/* Fallback redirect */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }

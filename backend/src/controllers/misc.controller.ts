@@ -148,6 +148,56 @@ export const markNotificationRead = async (req: Request, res: Response) => {
   }
 };
 
+export const deleteNotification = async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { id } = req.params;
+
+    const notif = await prisma.notification.findFirst({
+      where: { id, userId: authReq.user.id }
+    });
+
+    if (!notif) {
+      return res.status(404).json({ error: 'Notification not found.' });
+    }
+
+    await prisma.notification.delete({
+      where: { id }
+    });
+
+    const unreadCount = await prisma.notification.count({
+      where: { userId: authReq.user.id, isRead: false }
+    });
+
+    res.json({ message: 'Notification deleted successfully', unreadCount });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
+export const clearAllNotifications = async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    await prisma.notification.deleteMany({
+      where: { userId: authReq.user.id }
+    });
+
+    res.json({ message: 'All notifications cleared successfully', unreadCount: 0 });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
 export const getProjectActivityFeed = async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthenticatedRequest;

@@ -113,193 +113,200 @@ export const createProjectWithTeam = async (req: Request, res: Response) => {
     const uniqueMemberIds = Array.from(new Set([creatorId, ...rawMemberIds]));
 
     // Atomic transaction for Team + Members + Project + Objectives + Calendar Events + Milestones + Tasks + Activity Log
-    const result = await prisma.$transaction(async (tx) => {
-      let teamIdToUse = existingTeamId;
+    const result = await prisma.$transaction(
+      async (tx) => {
+        let teamIdToUse = existingTeamId;
 
-      if (teamIdToUse) {
-        // Verify existing team exists
-        const existingTeam = await tx.team.findUnique({
-          where: { id: teamIdToUse },
-          include: { members: true },
-        });
-        if (!existingTeam) {
-          throw new Error('Selected existing team not found.');
-        }
+        if (teamIdToUse) {
+          // Verify existing team exists
+          const existingTeam = await tx.team.findUnique({
+            where: { id: teamIdToUse },
+            include: { members: true },
+          });
+          if (!existingTeam) {
+            throw new Error('Selected existing team not found.');
+          }
 
-        // Add any missing selected members to this existing team
-        const currentMemberUserIds = new Set(existingTeam.members.map((m: any) => m.userId));
-        for (const userId of uniqueMemberIds) {
-          if (!currentMemberUserIds.has(userId)) {
-            await tx.teamMember.create({
-              data: {
-                userId,
-                teamId: teamIdToUse,
-                role: userId === creatorId ? 'OWNER' : 'MEMBER',
-              },
+          // Add any missing selected members to this existing team
+          const currentMemberUserIds = new Set(existingTeam.members.map((m: any) => m.userId));
+          const newMembers = uniqueMemberIds
+            .filter((userId) => !currentMemberUserIds.has(userId))
+            .map((userId) => ({
+              id: crypto.randomUUID(),
+              userId,
+              teamId: teamIdToUse!,
+              role: userId === creatorId ? 'OWNER' : 'MEMBER',
+            }));
+
+          if (newMembers.length > 0) {
+            await tx.teamMember.createMany({
+              data: newMembers,
+              skipDuplicates: true,
             });
           }
-        }
-      } else {
-        // Generate unique 8-character invite code for new team
-        let inviteCode = '';
-        let isUnique = false;
-        while (!isUnique) {
-          inviteCode = crypto.randomBytes(4).toString('hex').toUpperCase();
-          const existing = await tx.team.findUnique({ where: { inviteCode } });
-          if (!existing) isUnique = true;
+        } else {
+          // Generate unique 8-character invite code for new team
+          let inviteCode = '';
+          let isUnique = false;
+          while (!isUnique) {
+            inviteCode = crypto.randomBytes(4).toString('hex').toUpperCase();
+            const existing = await tx.team.findUnique({ where: { inviteCode } });
+            if (!existing) isUnique = true;
+          }
+
+          // 1. Create the new Team
+          const team = await tx.team.create({
+            data: {
+              name: teamName.trim(),
+              inviteCode,
+            },
+          });
+          teamIdToUse = team.id;
+
+          // 2. Add creator as OWNER and other selected members as MEMBER
+          const memberRecords = uniqueMemberIds.map((userId) => ({
+            id: crypto.randomUUID(),
+            userId,
+            teamId: team.id,
+            role: userId === creatorId ? 'OWNER' : 'MEMBER',
+          }));
+          await tx.teamMember.createMany({
+            data: memberRecords,
+            skipDuplicates: true,
+          });
         }
 
-        // 1. Create the new Team
-        const team = await tx.team.create({
+        // 3. Create the Project
+        const parsedTechStack = Array.isArray(techStack) ? techStack : [];
+        const parsedObjectives = Array.isArray(objectives) ? objectives : [];
+        const parsedStartDate = startDate ? new Date(startDate) : null;
+        const parsedEndDate = endDate ? new Date(endDate) : null;
+        const projectId = crypto.randomUUID();
+        const startEventId = parsedStartDate ? crypto.randomUUID() : null;
+        const endEventId = parsedEndDate ? crypto.randomUUID() : null;
+
+        const project = await tx.project.create({
           data: {
-            name: teamName.trim(),
-            inviteCode,
+            id: projectId,
+            title: title.trim(),
+            description: description?.trim() || '',
+            objectives: JSON.stringify(parsedObjectives),
+            techStack: parsedTechStack,
+            githubRepo: githubRepo?.trim() || null,
+            startDate: parsedStartDate,
+            endDate: parsedEndDate,
+            startEventId,
+            endEventId,
+            teamId: teamIdToUse!,
+            healthScore: 100,
+            status: 'HEALTHY',
           },
         });
-        teamIdToUse = team.id;
 
-        // 2. Add creator as OWNER and other selected members as MEMBER
-        for (const userId of uniqueMemberIds) {
-          await tx.teamMember.create({
-            data: {
-              userId,
-              teamId: team.id,
-              role: userId === creatorId ? 'OWNER' : 'MEMBER',
-            },
+        // 4. Batch create calendar events if dates provided
+        const calendarEventsToCreate: any[] = [];
+        if (parsedStartDate && startEventId) {
+          calendarEventsToCreate.push({
+            id: startEventId,
+            projectId: project.id,
+            title: `${project.title} (Project Start)`,
+            date: parsedStartDate,
+            type: 'project_start',
+            description: `Project kicked off: ${project.title}`,
           });
         }
-      }
 
-      // 3. Create the Project
-      const parsedTechStack = Array.isArray(techStack) ? techStack : [];
-      const parsedObjectives = Array.isArray(objectives) ? objectives : [];
-      const parsedStartDate = startDate ? new Date(startDate) : null;
-      const parsedEndDate = endDate ? new Date(endDate) : null;
-
-      const project = await tx.project.create({
-        data: {
-          title: title.trim(),
-          description: description?.trim() || '',
-          objectives: JSON.stringify(parsedObjectives),
-          techStack: parsedTechStack,
-          githubRepo: githubRepo?.trim() || null,
-          startDate: parsedStartDate,
-          endDate: parsedEndDate,
-          teamId: teamIdToUse,
-          healthScore: 100,
-          status: 'HEALTHY',
-        },
-      });
-
-      // 4. Auto-create calendar events if dates provided
-      if (parsedStartDate) {
-        try {
-          const startEvent = await tx.calendarEvent.create({
-            data: {
-              projectId: project.id,
-              title: `${project.title} (Project Start)`,
-              date: parsedStartDate,
-              type: 'project_start',
-              description: `Project kicked off: ${project.title}`,
-            },
+        if (parsedEndDate && endEventId) {
+          calendarEventsToCreate.push({
+            id: endEventId,
+            projectId: project.id,
+            title: `${project.title} (Project Deadline)`,
+            date: parsedEndDate,
+            type: 'project_deadline',
+            description: `Project delivery deadline: ${project.title}`,
           });
-          await tx.project.update({
-            where: { id: project.id },
-            data: { startEventId: startEvent.id },
-          });
-        } catch {
-          // Non-fatal if table not initialized
         }
-      }
 
-      if (parsedEndDate) {
-        try {
-          const endEvent = await tx.calendarEvent.create({
-            data: {
-              projectId: project.id,
-              title: `${project.title} (Project Deadline)`,
-              date: parsedEndDate,
-              type: 'project_deadline',
-              description: `Project delivery deadline: ${project.title}`,
-            },
-          });
-          await tx.project.update({
-            where: { id: project.id },
-            data: { endEventId: endEvent.id },
-          });
-        } catch {
-          // Non-fatal
+        if (calendarEventsToCreate.length > 0) {
+          try {
+            await tx.calendarEvent.createMany({
+              data: calendarEventsToCreate,
+            });
+          } catch (calErr) {
+            console.warn('[CalendarEvent createMany warning]', calErr);
+          }
         }
-      }
 
-      // 5. Create Milestones and nested Tasks if supplied
-      const milestoneMap = new Map<string, string>(); // title/key -> milestoneId
-      const createdMilestones = [];
-      const createdTasks = [];
+        // 5. Prepare Milestones and Tasks for batch insertion
+        const milestoneMap = new Map<string, string>(); // title/key -> milestoneId
+        const createdMilestones: any[] = [];
+        const milestoneRecords: any[] = [];
+        const taskRecords: any[] = [];
 
-      if (Array.isArray(milestones) && milestones.length > 0) {
-        for (const ms of milestones) {
-          if (!ms.title || !ms.title.trim()) continue;
-          const msDueDate = ms.dueDate ? new Date(ms.dueDate) : parsedEndDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-          const milestone = await tx.milestone.create({
-            data: {
+        if (Array.isArray(milestones) && milestones.length > 0) {
+          for (let i = 0; i < milestones.length; i++) {
+            const ms = milestones[i];
+            if (!ms.title || !ms.title.trim()) continue;
+            const msId = crypto.randomUUID();
+            const msDueDate = ms.dueDate ? new Date(ms.dueDate) : (parsedEndDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
+            const msRecord = {
+              id: msId,
               projectId: project.id,
               title: ms.title.trim(),
               description: ms.description?.trim() || '',
               dueDate: msDueDate,
               status: 'PENDING',
-            },
-          });
-          createdMilestones.push(milestone);
-          milestoneMap.set(ms.title.trim().toLowerCase(), milestone.id);
+            };
+            milestoneRecords.push(msRecord);
+            createdMilestones.push(msRecord);
+            milestoneMap.set(ms.title.trim().toLowerCase(), msId);
+            milestoneMap.set(`idx_${i}`, msId);
 
-          // If milestone has nested tasks
-          if (Array.isArray(ms.tasks) && ms.tasks.length > 0) {
-            for (const t of ms.tasks) {
-              if (!t.title || !t.title.trim()) continue;
-              const taskDueDate = t.dueDate ? new Date(t.dueDate) : msDueDate;
-              const taskPriority = ['HIGH', 'MEDIUM', 'LOW'].includes((t.priority || '').toUpperCase())
-                ? t.priority.toUpperCase()
-                : 'MEDIUM';
-              const assignedUserId = t.assigneeId && uniqueMemberIds.includes(t.assigneeId) ? t.assigneeId : null;
+            // If milestone has nested tasks
+            if (Array.isArray(ms.tasks) && ms.tasks.length > 0) {
+              for (const t of ms.tasks) {
+                if (!t.title || !t.title.trim()) continue;
+                const taskDueDate = t.dueDate ? new Date(t.dueDate) : msDueDate;
+                const taskPriority = ['HIGH', 'MEDIUM', 'LOW'].includes((t.priority || '').toUpperCase())
+                  ? t.priority.toUpperCase()
+                  : 'MEDIUM';
+                const assignedUserId = t.assigneeId && uniqueMemberIds.includes(t.assigneeId) ? t.assigneeId : null;
 
-              const task = await tx.task.create({
-                data: {
+                taskRecords.push({
+                  id: crypto.randomUUID(),
                   title: t.title.trim(),
                   description: t.description?.trim() || '',
                   priority: taskPriority,
                   status: 'TODO',
                   projectId: project.id,
-                  milestoneId: milestone.id,
+                  milestoneId: msId,
                   assigneeId: assignedUserId,
                   dueDate: taskDueDate,
-                },
-              });
-              createdTasks.push(task);
+                });
+              }
             }
           }
         }
-      }
 
-      // 6. Create standalone tasks if passed separately
-      if (Array.isArray(tasks) && tasks.length > 0) {
-        for (const t of tasks) {
-          if (!t.title || !t.title.trim()) continue;
-          let milestoneId: string | null = null;
-          if (t.milestoneTitle) {
-            milestoneId = milestoneMap.get(t.milestoneTitle.trim().toLowerCase()) || null;
-          } else if (typeof t.milestoneIndex === 'number' && createdMilestones[t.milestoneIndex]) {
-            milestoneId = createdMilestones[t.milestoneIndex].id;
-          }
+        // 6. Standalone tasks if passed separately
+        if (Array.isArray(tasks) && tasks.length > 0) {
+          for (const t of tasks) {
+            if (!t.title || !t.title.trim()) continue;
+            let milestoneId: string | null = null;
+            if (t.milestoneTitle) {
+              milestoneId = milestoneMap.get(t.milestoneTitle.trim().toLowerCase()) || null;
+            } else if (typeof t.milestoneIndex === 'number' && createdMilestones[t.milestoneIndex]) {
+              milestoneId = createdMilestones[t.milestoneIndex].id;
+            }
 
-          const taskDueDate = t.dueDate ? new Date(t.dueDate) : parsedEndDate;
-          const taskPriority = ['HIGH', 'MEDIUM', 'LOW'].includes((t.priority || '').toUpperCase())
-            ? t.priority.toUpperCase()
-            : 'MEDIUM';
-          const assignedUserId = t.assigneeId && uniqueMemberIds.includes(t.assigneeId) ? t.assigneeId : null;
+            const taskDueDate = t.dueDate ? new Date(t.dueDate) : parsedEndDate;
+            const taskPriority = ['HIGH', 'MEDIUM', 'LOW'].includes((t.priority || '').toUpperCase())
+              ? t.priority.toUpperCase()
+              : 'MEDIUM';
+            const assignedUserId = t.assigneeId && uniqueMemberIds.includes(t.assigneeId) ? t.assigneeId : null;
 
-          const task = await tx.task.create({
-            data: {
+            taskRecords.push({
+              id: crypto.randomUUID(),
               title: t.title.trim(),
               description: t.description?.trim() || '',
               priority: taskPriority,
@@ -308,52 +315,63 @@ export const createProjectWithTeam = async (req: Request, res: Response) => {
               milestoneId,
               assigneeId: assignedUserId,
               dueDate: taskDueDate,
-            },
-          });
-          createdTasks.push(task);
+            });
+          }
         }
-      }
 
-      // 7. Activity log
-      await tx.activityLog.create({
-        data: {
-          userId: creatorId,
-          projectId: project.id,
-          action: 'CREATED_PROJECT',
-          metadata: JSON.stringify({
-            title: project.title,
-            membersCount: uniqueMemberIds.length,
-            milestonesCount: createdMilestones.length,
-            tasksCount: createdTasks.length,
-          }),
-        },
-      });
+        // Batch insert milestones and tasks in 2 single round-trips
+        if (milestoneRecords.length > 0) {
+          await tx.milestone.createMany({ data: milestoneRecords });
+        }
+        if (taskRecords.length > 0) {
+          await tx.task.createMany({ data: taskRecords });
+        }
 
-      // Fetch team with populated members
-      const teamWithMembers = await tx.team.findUnique({
-        where: { id: teamIdToUse },
-        include: {
-          members: {
-            include: {
-              user: {
-                select: { id: true, name: true, email: true, avatarUrl: true, skills: true },
+        // 7. Activity log
+        await tx.activityLog.create({
+          data: {
+            userId: creatorId,
+            projectId: project.id,
+            action: 'CREATED_PROJECT',
+            metadata: JSON.stringify({
+              title: project.title,
+              membersCount: uniqueMemberIds.length,
+              milestonesCount: milestoneRecords.length,
+              tasksCount: taskRecords.length,
+            }),
+          },
+        });
+
+        // Fetch team with populated members
+        const teamWithMembers = await tx.team.findUnique({
+          where: { id: teamIdToUse! },
+          include: {
+            members: {
+              include: {
+                user: {
+                  select: { id: true, name: true, email: true, avatarUrl: true, skills: true },
+                },
               },
             },
           },
-        },
-      });
+        });
 
-      // Fetch newly created project with relations
-      const fullProject = await tx.project.findUnique({
-        where: { id: project.id },
-        include: {
-          milestones: { include: { tasks: true } },
-          tasks: { include: { assignee: true } },
-        },
-      });
+        // Fetch newly created project with relations
+        const fullProject = await tx.project.findUnique({
+          where: { id: project.id },
+          include: {
+            milestones: { include: { tasks: true } },
+            tasks: { include: { assignee: true } },
+          },
+        });
 
-      return { project: fullProject, team: teamWithMembers };
-    });
+        return { project: fullProject, team: teamWithMembers };
+      },
+      {
+        maxWait: 15000,
+        timeout: 60000,
+      }
+    );
 
     res.status(201).json({
       message: 'Project and team created successfully',

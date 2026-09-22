@@ -111,9 +111,24 @@ export default function Notifications() {
     }
   };
 
-  // Local dismiss (no delete endpoint, just hide locally)
-  const dismiss = (id: string) => setNotifications((ns) => ns.filter((n) => n.id !== id));
-  const clearAll = () => setNotifications([]);
+  // Real database-backed dismiss and clearAll with optimistic updates
+  const dismiss = async (id: string) => {
+    setNotifications((ns) => ns.filter((n) => n.id !== id));
+    try {
+      await api.delete(`/misc/notifications/${id}`);
+    } catch (err) {
+      console.error('Failed to delete notification:', err);
+    }
+  };
+
+  const clearAll = async () => {
+    setNotifications([]);
+    try {
+      await api.delete('/misc/notifications');
+    } catch (err) {
+      console.error('Failed to clear notifications:', err);
+    }
+  };
 
   return (
     <div className="space-y-8 max-w-3xl">

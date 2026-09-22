@@ -518,25 +518,25 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       <div className="flex-1 flex flex-col min-w-0 md:h-screen md:overflow-y-auto">
 
         {/* Topbar */}
-        <header className="hidden md:flex items-center justify-between px-6 lg:px-8 h-16 border-b border-border glass-panel sticky top-0 z-30 gap-4">
+        <header className="hidden md:flex items-center justify-between px-4 lg:px-8 h-16 border-b border-border glass-panel sticky top-0 z-30 gap-3 lg:gap-6">
 
           {/* Left Section: Global Search & Project Context */}
           <div className="flex items-center gap-3 min-w-0 flex-1">
             {/* Global Search */}
             <button
               onClick={() => setSearchOpen(true)}
-              className="flex items-center gap-2.5 w-48 sm:w-56 md:w-60 lg:w-72 h-9 px-3 glass-input rounded-xl text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all group flex-shrink-0"
+              className="flex items-center gap-2 w-40 md:w-52 lg:w-64 h-9 px-3 glass-input rounded-xl text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all group flex-shrink"
             >
               <Search className="w-3.5 h-3.5 text-slate-400 group-hover:text-primary transition-colors flex-shrink-0" />
-              <span className="flex-1 text-left text-xs truncate">Search projects, tasks, people...</span>
-              <div className="hidden sm:flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity flex-shrink-0">
+              <span className="flex-1 text-left text-xs truncate">Search workspace...</span>
+              <div className="hidden lg:flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity flex-shrink-0">
                 <kbd className="px-1.5 py-0.5 text-[10px] bg-secondary rounded font-mono">Ctrl</kbd>
                 <kbd className="px-1.5 py-0.5 text-[10px] bg-secondary rounded font-mono">K</kbd>
               </div>
             </button>
 
             {/* Persistent Project Context Selector */}
-            <div className="flex items-center gap-2 h-9 px-3 rounded-xl bg-secondary/50 border border-border/80 hover:border-border text-xs shadow-sm transition-all min-w-0">
+            <div className="flex items-center gap-2 h-9 px-3 rounded-xl bg-secondary/50 border border-border/80 hover:border-border text-xs shadow-sm transition-all min-w-[140px] max-w-[240px] flex-shrink-0">
               <FolderOpen className="w-3.5 h-3.5 text-primary flex-shrink-0" />
               <select
                 value={activeProjectId || ''}
@@ -553,7 +553,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
                     }
                   }
                 }}
-                className="bg-transparent font-semibold text-foreground text-xs focus:outline-none cursor-pointer max-w-[130px] sm:max-w-[170px] md:max-w-[210px] truncate"
+                className="bg-transparent font-semibold text-foreground text-xs focus:outline-none cursor-pointer w-full truncate"
                 title={activeProject ? activeProject.title : 'Select Project'}
               >
                 {userProjects.length === 0 ? (
@@ -573,9 +573,9 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
               </select>
 
               {activeProject?.teamName && (
-                <div className="hidden xl:flex items-center gap-1.5 pl-2 border-l border-border text-muted-foreground flex-shrink-0">
+                <div className="hidden 2xl:flex items-center gap-1.5 pl-2 border-l border-border text-muted-foreground flex-shrink-0">
                   <Users className="w-3 h-3 text-secondary-foreground flex-shrink-0" />
-                  <span className="font-medium text-[11px] text-foreground max-w-[110px] truncate" title={activeProject.teamName}>
+                  <span className="font-medium text-[11px] text-foreground max-w-[100px] truncate" title={activeProject.teamName}>
                     {activeProject.teamName}
                   </span>
                 </div>
@@ -598,8 +598,10 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
                 title="Click to open Project Intelligence"
                 className={`h-9 px-3 rounded-xl text-xs font-semibold border flex items-center gap-2 cursor-pointer transition-all hover:brightness-110 active:scale-95 ${currentProviderConfig.badgeCls}`}
               >
-                <span className={`w-2 h-2 rounded-full ${currentAiStatus.dot} shadow-[0_0_6px_rgba(52,211,153,0.4)]`} />
-                <span className="whitespace-nowrap">{currentProviderConfig.label}</span>
+                <span className={`w-2 h-2 rounded-full ${currentAiStatus.dot} shadow-[0_0_6px_rgba(52,211,153,0.4)] flex-shrink-0`} />
+                <Brain className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="hidden xl:inline whitespace-nowrap">{currentProviderConfig.label}</span>
+                <span className="xl:hidden whitespace-nowrap">AI</span>
               </div>
               <div className="absolute right-0 top-full mt-2 z-50 w-72 rounded-xl border border-border bg-slate-950/95 backdrop-blur p-4 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto shadow-2xl">
                 <div className="flex items-center justify-between mb-2">
