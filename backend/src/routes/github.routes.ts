@@ -82,6 +82,58 @@ router.get('/health', (_req, res) => {
   });
 });
 
+// GET /api/github/repos — get all connected repositories for user's projects
+router.get('/repos', async (req, res) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const teamMemberships = await prisma.teamMember.findMany({
+      where: { userId: authReq.user.id },
+      select: { teamId: true }
+    });
+    const teamIds = teamMemberships.map(tm => tm.teamId);
+
+    const projects = await prisma.project.findMany({
+      where: { teamId: { in: teamIds } },
+      select: {
+        id: true,
+        title: true,
+        githubRepo: true,
+        repositories: {
+          select: {
+            id: true,
+            owner: true,
+            repoName: true,
+            fullPath: true,
+            connectedByUserId: true,
+            createdAt: true
+          }
+        }
+      }
+    });
+
+    const repos: any[] = [];
+    projects.forEach(p => {
+      p.repositories.forEach(r => repos.push({ ...r, projectId: p.id, projectName: p.title }));
+      if (p.githubRepo && !p.repositories.some(r => r.fullPath?.toLowerCase() === p.githubRepo?.toLowerCase())) {
+        repos.push({
+          id: `legacy-${p.id}`,
+          repoName: p.githubRepo.split('/').pop() || p.githubRepo,
+          fullPath: p.githubRepo,
+          projectId: p.id,
+          projectName: p.title,
+          isPrimary: true
+        });
+      }
+    });
+
+    res.json({ success: true, count: repos.length, repositories: repos });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to fetch repositories' });
+  }
+});
+
 // 1. GITHUB INTELLIGENCE HUB API (Combines GitHub REST API + Gemini AI Insights)
 router.get('/intelligence', geminiRateLimiter, async (req, res) => {
   try {

@@ -556,4 +556,181 @@ Return a JSON object:
       ]
     };
   }
+
+  // 6. PROJECT MONITORING & AI ANALYSIS
+  static async analyzeProjectMonitoring(
+    projectData: {
+      title: string;
+      description: string;
+      teamName: string;
+      ownerName: string;
+      githubRepo: string | null;
+      commitsCount: number;
+      tasks: Array<{ title: string; status: string; priority: string; dueDate?: string | Date | null; assigneeName?: string | null }>;
+      milestones: Array<{ title: string; status: string; dueDate: string | Date }>;
+      activeMembersCount: number;
+    },
+    userId?: string,
+    projectId?: string
+  ) {
+    const tasksTotal = projectData.tasks.length;
+    const tasksCompleted = projectData.tasks.filter(t => t.status === 'COMPLETED').length;
+    const tasksPending = tasksTotal - tasksCompleted;
+    const now = new Date();
+    const tasksOverdue = projectData.tasks.filter(t => t.status !== 'COMPLETED' && t.dueDate && new Date(t.dueDate) < now).length;
+
+    const milestonesTotal = projectData.milestones.length;
+    const milestonesCompleted = projectData.milestones.filter(m => m.status === 'COMPLETED').length;
+    const milestonesOverdue = projectData.milestones.filter(m => m.status !== 'COMPLETED' && new Date(m.dueDate) < now).length;
+
+    // Calculate real deterministic health score
+    const taskCompletionPct = tasksTotal > 0 ? (tasksCompleted / tasksTotal) * 100 : 100;
+    const commitRatio = Math.min((projectData.commitsCount / 15) * 100, 100);
+    const baseScore = Math.round(taskCompletionPct * 0.5 + commitRatio * 0.3 + 20); // 20 baseline team collab
+    const overduePenalty = Math.min((tasksOverdue + milestonesOverdue) * 10, 30);
+    const healthScore = Math.max(0, Math.min(100, baseScore - overduePenalty));
+    const healthStatus: 'HEALTHY' | 'ATTENTION' | 'RISK' = healthScore >= 75 ? 'HEALTHY' : healthScore >= 50 ? 'ATTENTION' : 'RISK';
+
+    const prompt = `
+You are an expert AI Project Manager and Engineering Director.
+Analyze this software project's health and operational status based on real metrics:
+
+Project: "${projectData.title}"
+Description: "${projectData.description}"
+Team: "${projectData.teamName}" (Owner: ${projectData.ownerName}, ${projectData.activeMembersCount} members)
+GitHub Repository: ${projectData.githubRepo || 'Not connected'} (${projectData.commitsCount} commits)
+
+Tasks Summary:
+- Total: ${tasksTotal}
+- Completed: ${tasksCompleted}
+- Pending: ${tasksPending}
+- Overdue: ${tasksOverdue}
+
+Milestones Summary:
+- Total: ${milestonesTotal}
+- Completed: ${milestonesCompleted}
+- Overdue: ${milestonesOverdue}
+
+Calculated Health Score: ${healthScore}% (${healthStatus})
+
+Return a JSON object matching EXACTLY this structure:
+{
+  "summary": "2-3 sentences evaluating progress, velocity, and focus areas.",
+  "insights": [
+    {
+      "type": "delay|low_activity|progress|risk",
+      "title": "Short title",
+      "message": "Specific explanation based on real project facts."
+    }
+  ],
+  "recommendations": [
+    {
+      "action": "Actionable task or review step",
+      "priority": "HIGH|MEDIUM|LOW",
+      "reason": "Why this action is needed right now"
+    }
+  ]
+}
+
+Rules:
+- Generate 3 to 5 specific insights. Use "delay" if milestones/tasks are overdue, "low_activity" if commits or tasks are lagging, "progress" for achievements, and "risk" for technical/timeline hazards.
+- Generate 3 to 4 concrete, actionable recommendations.
+- NEVER invent imaginary numbers; reference the provided tasks, milestones, and commits.
+`;
+
+    const fallbackGenerator = () => {
+      const insights: Array<{ type: 'delay' | 'low_activity' | 'progress' | 'risk'; title: string; message: string }> = [];
+
+      if (milestonesOverdue > 0) {
+        insights.push({
+          type: 'delay',
+          title: 'Milestone Behind Timeline',
+          message: `${milestonesOverdue} milestone${milestonesOverdue > 1 ? 's are' : ' is'} past the planned completion date and require schedule review.`
+        });
+      }
+
+      if (tasksOverdue > 0) {
+        insights.push({
+          type: 'delay',
+          title: 'Overdue Task Delivery',
+          message: `${tasksOverdue} assigned task${tasksOverdue > 1 ? 's have' : ' has'} exceeded the target due date without completion.`
+        });
+      }
+
+      if (projectData.commitsCount < 5 && projectData.githubRepo) {
+        insights.push({
+          type: 'low_activity',
+          title: 'Low Codebase Commits',
+          message: `Only ${projectData.commitsCount} commits have been synced from ${projectData.githubRepo}. Development activity may need attention.`
+        });
+      } else if (!projectData.githubRepo) {
+        insights.push({
+          type: 'risk',
+          title: 'GitHub Repository Disconnected',
+          message: 'No GitHub repository is linked. Connect a repository in Project Settings to track commits and code progress.'
+        });
+      }
+
+      if (tasksCompleted > 0) {
+        insights.push({
+          type: 'progress',
+          title: 'Progress Milestone Completed',
+          message: `${tasksCompleted} out of ${tasksTotal} tasks (${Math.round(taskCompletionPct)}%) have been completed successfully.`
+        });
+      }
+
+      if (insights.length === 0) {
+        insights.push({
+          type: 'progress',
+          title: 'Project on Track',
+          message: 'All tasks and milestones are currently tracking within acceptable schedule tolerances.'
+        });
+      }
+
+      const recommendations = [
+        ...(milestonesOverdue > 0 ? [{ action: 'Review delayed milestones', priority: 'HIGH' as const, reason: 'Re-align target completion dates with available developer capacity.' }] : []),
+        ...(tasksOverdue > 0 ? [{ action: 'Follow up on overdue tasks', priority: 'HIGH' as const, reason: 'Ensure team members are not blocked by missing requirements or external dependencies.' }] : []),
+        ...(projectData.githubRepo ? [{ action: 'Sync latest GitHub commits', priority: 'MEDIUM' as const, reason: 'Keep git analytics and commit verifications up to date.' }] : [{ action: 'Link GitHub repository', priority: 'MEDIUM' as const, reason: 'Enable automated commit and PR tracking for project tasks.' }]),
+        { action: 'Review upcoming sprint deadlines', priority: 'LOW' as const, reason: 'Keep milestone deliverable expectations clear across all team members.' }
+      ];
+
+      return {
+        summary: `Project "${projectData.title}" is currently at ${healthScore}% health status (${healthStatus}). ${tasksCompleted}/${tasksTotal} tasks and ${milestonesCompleted}/${milestonesTotal} milestones are completed with ${projectData.commitsCount} commits recorded.`,
+        insights,
+        recommendations
+      };
+    };
+
+    const res = await AIRouterService.generateJSON<{
+      summary: string;
+      insights: Array<{ type: 'delay' | 'low_activity' | 'progress' | 'risk'; title: string; message: string }>;
+      recommendations: Array<{ action: string; priority: 'HIGH' | 'MEDIUM' | 'LOW'; reason: string }>;
+    }>(
+      prompt,
+      fallbackGenerator,
+      { feature: 'aipm', ...(userId ? { userId } : {}), ...(projectId ? { projectId } : {}) }
+    );
+
+    return {
+      summary: res.data.summary,
+      healthScore,
+      healthStatus,
+      insights: res.data.insights || [],
+      recommendations: res.data.recommendations || [],
+      metrics: {
+        tasksTotal,
+        tasksCompleted,
+        tasksOverdue,
+        tasksPending,
+        milestonesTotal,
+        milestonesCompleted,
+        milestonesOverdue,
+        commitsCount: projectData.commitsCount,
+        activeMembersCount: projectData.activeMembersCount,
+        teamName: projectData.teamName,
+        ownerName: projectData.ownerName,
+        githubRepo: projectData.githubRepo,
+      }
+    };
+  }
 }

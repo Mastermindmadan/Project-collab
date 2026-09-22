@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Zap, FileText, AlertTriangle, BarChart3, Brain, Loader2,
   CheckCircle2, ChevronRight, Sparkles, Clock, Target, AlertCircle, RefreshCw,
@@ -44,9 +45,22 @@ const tools = [
 ];
 
 export default function AIPlanner() {
+  const navigate = useNavigate();
   const [activeTool, setActiveTool] = useState<AITool>('planner');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleLaunchProjectFromPlan = () => {
+    if (!plannerResult) return;
+    const planDraft = {
+      title: projectTitle,
+      description: projectDesc,
+      techStack: plannerResult.techSuggestions || [],
+      phases: plannerResult.phases || [],
+    };
+    localStorage.setItem('pcai_planner_project_draft', JSON.stringify(planDraft));
+    navigate('/projects?fromPlanner=true');
+  };
 
   // Form Inputs
   const [projectTitle, setProjectTitle] = useState('Smart Campus Navigation System');
@@ -193,11 +207,11 @@ export default function AIPlanner() {
       {/* Header */}
       <div>
         <p className="text-muted-foreground text-sm mb-1 flex items-center gap-1.5 font-medium">
-          <Zap className="w-4 h-4 text-primary" /> Google Gemini AI Intelligence Suite
+          <Zap className="w-4 h-4 text-primary" /> ProjectCollab AI Intelligence Suite
         </p>
         <h1 className="text-3xl font-extrabold text-foreground tracking-tight">AI Planning & Risk Analytics</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Powered by Google Gemini API · Real-time task planning, requirement analysis, risk detection, and sprint intelligence
+          Powered by ProjectCollab AI Engine · Real-time task planning, requirement analysis, risk detection, and sprint intelligence
         </p>
       </div>
 
@@ -305,7 +319,7 @@ export default function AIPlanner() {
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                Google Gemini will parse functional specs, non-functional rules, user stories, missing requirements, and risk factors.
+                ProjectCollab AI will parse functional specs, non-functional rules, user stories, missing requirements, and risk factors.
               </p>
             </div>
           )}
@@ -386,9 +400,9 @@ export default function AIPlanner() {
             className="w-full py-3 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-sm rounded-xl transition-all flex items-center justify-center gap-2 shadow-md disabled:opacity-50"
           >
             {loading ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /> Gemini AI is analyzing...</>
+              <><Loader2 className="w-4 h-4 animate-spin" /> ProjectCollab AI is analyzing...</>
             ) : (
-              <><Sparkles className="w-4 h-4" /> Generate Gemini AI Analysis</>
+              <><Sparkles className="w-4 h-4" /> Generate ProjectCollab AI Analysis</>
             )}
           </button>
         </div>
@@ -403,7 +417,7 @@ export default function AIPlanner() {
               </div>
               <h3 className="text-base font-bold text-foreground mb-2">Ready to Run AI Analysis</h3>
               <p className="text-sm text-muted-foreground max-w-xs leading-relaxed">
-                Configure parameters on the left and click "Generate Gemini AI Analysis" to view real-time Google Gemini intelligence.
+                Configure parameters on the left and click "Generate ProjectCollab AI Analysis" to view real-time intelligence.
               </p>
             </div>
           )}
@@ -416,7 +430,7 @@ export default function AIPlanner() {
                 <Brain className="w-6 h-6 text-primary absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-foreground">Google Gemini AI is processing...</h3>
+                <h3 className="text-base font-bold text-foreground">ProjectCollab AI is processing...</h3>
                 <p className="text-xs text-muted-foreground mt-1">Synthesizing milestones · Evaluating risks · Structuring output</p>
               </div>
             </div>
@@ -434,9 +448,17 @@ export default function AIPlanner() {
                     <Clock className="w-3.5 h-3.5" /> Total Time: <span className="font-bold text-foreground">{plannerResult.totalTime}</span>
                   </p>
                 </div>
-                <button onClick={runAnalysis} className="p-2 rounded-xl glass-card text-muted-foreground hover:text-foreground">
-                  <RefreshCw className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleLaunchProjectFromPlan}
+                    className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-xl transition-all shadow-md inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> Launch Project with this Plan →
+                  </button>
+                  <button onClick={runAnalysis} className="p-2 rounded-xl glass-card text-muted-foreground hover:text-foreground" title="Re-generate Plan">
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               {/* Phases */}

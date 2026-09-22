@@ -434,7 +434,7 @@ export default function AppSettings() {
                   <h2 className="text-base font-bold text-white flex items-center gap-2">
                     <Cpu className="w-4 h-4 text-purple-400" /> Multi-AI Router &amp; Quota Management
                   </h2>
-                  <p className="text-xs text-slate-500 mt-1">Automatic provider failover (Gemini → Groq → OpenAI), prompt caching, and daily feature limits.</p>
+                  <p className="text-xs text-slate-500 mt-1">Automatic provider failover (ProjectCollab AI → Groq → OpenAI), prompt caching, and daily feature limits.</p>
                 </div>
                 <button
                   onClick={fetchAiStats}
@@ -464,9 +464,9 @@ export default function AppSettings() {
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       {[
                         {
-                          name: 'Gemini (Primary)',
+                          name: 'ProjectCollab AI (Primary)',
                           key: 'gemini',
-                          desc: aiHealth?.activeKeyDisplay ? `Rotation pool: ${aiHealth.activeKeyDisplay}` : 'Google Gemini API multi-key pool',
+                          desc: aiHealth?.activeKeyDisplay ? `Rotation pool: ${aiHealth.activeKeyDisplay}` : 'ProjectCollab AI Engine multi-key pool',
                           cls: 'border-purple-500/30 bg-purple-500/5',
                         },
                         {

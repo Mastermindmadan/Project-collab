@@ -10,6 +10,7 @@ import {
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import api from '../utils/api';
 import { useAuthStore } from '../store/auth.store';
+import { useProjectStore } from '../store/project.store';
 import ActivityFeed from '../components/ActivityFeed';
 
 interface ConnectedRepo {
@@ -105,9 +106,16 @@ export default function GitHubIntegration() {
         });
         setProjects(allProjects);
 
-        // Restore last-used project from localStorage (scoped to this account)
+        // Restore from URL query param ?project=, activeProjectId, or localStorage
+        const urlParams = new URLSearchParams(window.location.search);
+        const queryPid = urlParams.get('project');
+        const activeStorePid = useProjectStore.getState().activeProjectId;
         const lastPid = localStorage.getItem(`pcai-github-project-${currentUserId}`);
-        if (lastPid && allProjects.find(p => p.id === lastPid)) {
+        if (queryPid && allProjects.find(p => p.id === queryPid)) {
+          setSelectedProjectId(queryPid);
+        } else if (activeStorePid && allProjects.find(p => p.id === activeStorePid)) {
+          setSelectedProjectId(activeStorePid);
+        } else if (lastPid && allProjects.find(p => p.id === lastPid)) {
           setSelectedProjectId(lastPid);
         } else if (allProjects.length > 0) {
           setSelectedProjectId(allProjects[0].id);
@@ -359,9 +367,9 @@ export default function GitHubIntegration() {
           <p className="text-muted-foreground text-sm mb-1 flex items-center gap-1.5 font-medium">
             <Github className="w-4 h-4 text-primary" /> GitHub Intelligence Hub
           </p>
-          <h1 className="text-3xl font-extrabold text-foreground tracking-tight">GitHub &amp; AI Codebase Intelligence</h1>
+          <h1 className="text-3xl font-extrabold text-foreground tracking-tight">GitHub &amp; ProjectCollab AI Intelligence</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Project-scoped repo analysis · Real GitHub REST API · Google Gemini AI insights · Contributor identity matching
+            Project-scoped repo analysis · Real GitHub REST API · ProjectCollab AI insights · Contributor identity matching
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -388,7 +396,7 @@ export default function GitHubIntegration() {
       {showGuide && (
         <div className="glass-panel p-5 rounded-2xl border-primary/30 bg-primary/5 space-y-3">
           <h3 className="text-base font-bold text-foreground flex items-center gap-2">
-            <HelpCircle className="w-5 h-5 text-primary" /> GitHub REST API &amp; Gemini AI Integration
+            <HelpCircle className="w-5 h-5 text-primary" /> GitHub REST API &amp; ProjectCollab AI Integration
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
             <div className="p-3.5 glass-card rounded-xl">
@@ -401,10 +409,10 @@ export default function GitHubIntegration() {
             </div>
             <div className="p-3.5 glass-card rounded-xl">
               <span className="font-bold text-purple-400 flex items-center gap-1.5 mb-1">
-                <Brain className="w-4 h-4" /> Google Gemini AI Analysis
+                <Brain className="w-4 h-4" /> ProjectCollab AI Analysis
               </span>
               <p className="text-muted-foreground text-xs leading-relaxed">
-                Repository statistics fed to Gemini for health scores, bottleneck detection, and structural recommendations.
+                Repository statistics fed to ProjectCollab AI for health scores, bottleneck detection, and structural recommendations.
               </p>
             </div>
             <div className="p-3.5 glass-card rounded-xl">
@@ -435,7 +443,13 @@ export default function GitHubIntegration() {
               {projects.map(p => (
                 <button
                   key={p.id}
-                  onClick={() => setSelectedProjectId(p.id)}
+                  onClick={() => {
+                    setSelectedProjectId(p.id);
+                    useProjectStore.getState().switchProject(p.id);
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('project', p.id);
+                    window.history.replaceState({}, '', url.toString());
+                  }}
                   className={`px-3 py-1.5 text-sm font-semibold rounded-lg border transition-all ${
                     selectedProjectId === p.id
                       ? 'bg-primary text-primary-foreground border-primary shadow-sm'
@@ -664,7 +678,7 @@ export default function GitHubIntegration() {
         {/* Tabs */}
         <div className="flex gap-2 p-1.5 glass-panel rounded-xl w-fit flex-wrap">
           {[
-            { id: 'ai', label: 'Gemini AI Intelligence', icon: Sparkles },
+            { id: 'ai', label: 'ProjectCollab AI Intelligence', icon: Sparkles },
             { id: 'commits', label: 'Recent Commits', icon: GitCommit },
             { id: 'branches', label: 'Branches', icon: GitBranch },
             { id: 'pulls', label: 'Pull Requests', icon: GitPullRequest },
@@ -691,17 +705,17 @@ export default function GitHubIntegration() {
         {isSyncing && (
           <div className="glass-panel p-12 rounded-2xl flex flex-col items-center justify-center text-center space-y-3">
             <Loader2 className="w-8 h-8 text-primary animate-spin" />
-            <p className="text-sm font-bold text-foreground">Fetching Repository Metrics &amp; Gemini AI Insights...</p>
+            <p className="text-sm font-bold text-foreground">Fetching Repository Metrics &amp; ProjectCollab AI Insights...</p>
           </div>
         )}
 
-        {/* Tab 1: Gemini AI */}
+        {/* Tab 1: ProjectCollab AI */}
         {!isSyncing && activeTab === 'ai' && aiInsights && (
           <div className="glass-panel rounded-2xl p-6 space-y-6">
             <div className="flex items-center justify-between border-b border-border pb-4">
               <div>
                 <h2 className="text-lg font-extrabold text-foreground flex items-center gap-2">
-                  <Brain className="w-5 h-5 text-purple-400" /> Gemini Codebase AI Insights
+                  <Brain className="w-5 h-5 text-purple-400" /> ProjectCollab AI Codebase Insights
                 </h2>
                 <p className="text-xs text-muted-foreground mt-0.5">Generated for {selectedRepoPath}</p>
               </div>
@@ -1011,7 +1025,7 @@ export default function GitHubIntegration() {
       {isLoading && !data && (
         <div className="glass-panel p-16 rounded-2xl flex flex-col items-center justify-center text-center space-y-3">
           <Loader2 className="w-8 h-8 text-primary animate-spin" />
-          <p className="text-sm font-bold text-foreground">Fetching Repository Metrics &amp; Gemini AI Insights...</p>
+          <p className="text-sm font-bold text-foreground">Fetching Repository Metrics &amp; ProjectCollab AI Insights...</p>
           <p className="text-xs text-muted-foreground">{selectedRepoPath}</p>
         </div>
       )}

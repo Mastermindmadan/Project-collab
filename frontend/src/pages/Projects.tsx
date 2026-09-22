@@ -1,18 +1,21 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/auth.store';
+import { useProjectStore } from '../store/project.store';
 import api from '../utils/api';
 import {
   FolderOpen, Plus, Search, Star, Users,
   Calendar, Github, Brain, Settings as SettingsIcon,
   ArrowLeft, CheckCircle2, ChevronRight, Loader2, FileText,
-  TrendingUp, ExternalLink, Grid3X3, List, X, Upload, Link2, CheckCircle, Trash2
+  TrendingUp, ExternalLink, Grid3X3, List, X, Upload, Link2, CheckCircle, Trash2,
+  ShieldCheck, AlertCircle, Clock, Tag, Target, CheckSquare, BarChart3
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell
 } from 'recharts';
 import DeploymentIntelligence from '../components/DeploymentIntelligence';
 import DeployProviderSettings from '../components/DeployProviderSettings';
+import CreateProjectWizard from '../components/CreateProjectWizard';
 
 interface Project {
   id: string;
@@ -35,12 +38,17 @@ interface Project {
         name: string;
         email: string;
         avatarUrl?: string;
+        skills?: string[];
       };
     }>;
   };
   documents?: Document[];
   meetings?: Meeting[];
   gitAnalytics?: GitAnalytics | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  techStack?: string[];
+  architectureDiagramUrl?: string | null;
 }
 
 interface Milestone {
@@ -56,6 +64,8 @@ interface Task {
   title: string;
   status: 'TODO' | 'IN_PROGRESS' | 'REVIEW' | 'COMPLETED';
   priority: 'LOW' | 'MEDIUM' | 'HIGH';
+  milestoneId?: string | null;
+  dueDate?: string | null;
   assignee?: {
     id: string;
     name: string;
@@ -106,7 +116,6 @@ export default function Projects() {
   const currentUser = useAuthStore((state) => state.user);
 
   // General States
-  const [teams, setTeams] = useState<any[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
@@ -117,16 +126,35 @@ export default function Projects() {
 
   // New Project Modal States
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
-  const [newDesc, setNewDesc] = useState('');
-  const [newObjectives, setNewObjectives] = useState<string[]>([]);
-  const [objectiveInput, setObjectiveInput] = useState('');
-  const [selectedTeamId, setSelectedTeamId] = useState('');
-  const [newGithubRepo, setNewGithubRepo] = useState('');
+  const [showHealthModal, setShowHealthModal] = useState(false);
   const [error, setError] = useState('');
 
   // Detailed Workspace States
-  const [activeTab, setActiveTab] = useState<'overview' | 'milestones' | 'docs' | 'git' | 'ai' | 'settings'>('overview');
+  type ProjectTab = 'overview' | 'tasks' | 'milestones' | 'team' | 'git' | 'analytics' | 'ai' | 'docs' | 'settings';
+  const [activeTab, setActiveTab] = useState<ProjectTab>(() => {
+    const tabParam = new URLSearchParams(window.location.search).get('tab');
+    if (tabParam && ['overview', 'tasks', 'milestones', 'team', 'git', 'analytics', 'ai', 'docs', 'settings'].includes(tabParam)) {
+      return tabParam as ProjectTab;
+    }
+    return 'overview';
+  });
+
+  const handleTabChange = (tabId: ProjectTab) => {
+    setActiveTab(tabId);
+    const params = new URLSearchParams(window.location.search);
+    params.set('tab', tabId);
+    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
+  };
+
+  // Quick Task Modal States
+  const [showTaskModal, setShowTaskModal] = useState(false);
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskPriority, setTaskPriority] = useState<'LOW' | 'MEDIUM' | 'HIGH'>('MEDIUM');
+  const [taskAssigneeId, setTaskAssigneeId] = useState('');
+  const [taskMilestoneId, setTaskMilestoneId] = useState('');
+  const [taskDueDate, setTaskDueDate] = useState('');
+  const [taskFilterStatus, setTaskFilterStatus] = useState<string>('ALL');
+  const [taskSearchQuery, setTaskSearchQuery] = useState<string>('');
 
   // Milestone Modal States
   const [showMilestoneModal, setShowMilestoneModal] = useState(false);
@@ -172,7 +200,6 @@ export default function Projects() {
       setError('');
       const teamsRes = await api.get('/teams/my-teams');
       const myTeams = teamsRes.data.teams || [];
-      setTeams(myTeams);
 
       // Helper: safely parse a JSON string or return the value as-is
       const safeJson = (val: any, fallback: any = []) => {
@@ -245,6 +272,9 @@ export default function Projects() {
       setAiAnalysisResult(null);
       setDelayPrediction(null);
       setSprintSummary(null);
+
+      // Sync active project with global store so topbar & sidebar stay in sync
+      useProjectStore.getState().switchProject(projectData.id);
     } catch (err) {
       console.error(err);
       setError('Failed to fetch detailed project workspace.');
@@ -256,6 +286,13 @@ export default function Projects() {
     loadInitialData();
   }, [projectId]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('create') === 'true' || params.get('fromPlanner') === 'true') {
+      setShowCreateModal(true);
+    }
+  }, []);
+
   const handleToggleStar = (id: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -264,57 +301,7 @@ export default function Projects() {
     );
   };
 
-  // Create Project handler
-  const handleCreateProject = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim() || !selectedTeamId) {
-      setError('Please provide project title and team.');
-      return;
-    }
 
-    try {
-      setActionLoading(true);
-      setError('');
-      const res = await api.post('/projects/create', {
-        title: newTitle,
-        description: newDesc,
-        objectives: newObjectives,
-        teamId: selectedTeamId,
-        githubRepo: newGithubRepo.trim() || null
-      });
-
-      const newProj = res.data.project;
-      setShowCreateModal(false);
-      // Reset inputs
-      setNewTitle('');
-      setNewDesc('');
-      setNewObjectives([]);
-      setSelectedTeamId('');
-      setNewGithubRepo('');
-
-      showToast(`✅ Project "${newTitle}" created successfully!`);
-      // Redirect to new project workspace
-      navigate(`/projects/${newProj.id}`);
-    } catch (err: any) {
-      console.error(err);
-      setError(err.response?.data?.error || 'Failed to create project.');
-      showToast('Failed to create project.', 'error');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const addObjective = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (objectiveInput.trim() && !newObjectives.includes(objectiveInput.trim())) {
-      setNewObjectives([...newObjectives, objectiveInput.trim()]);
-    }
-    setObjectiveInput('');
-  };
-
-  const removeObjective = (obj: string) => {
-    setNewObjectives(newObjectives.filter(o => o !== obj));
-  };
 
   // Milestone functions
   const handleCreateMilestone = async (e: React.FormEvent) => {
@@ -361,6 +348,45 @@ export default function Projects() {
       alert('Failed to update milestone.');
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  // Task functions for project-specific tasks view
+  const handleCreateTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProject || !taskTitle.trim()) return;
+    try {
+      setActionLoading(true);
+      await api.post('/tasks', {
+        projectId: selectedProject.id,
+        title: taskTitle.trim(),
+        priority: taskPriority,
+        assigneeId: taskAssigneeId || undefined,
+        milestoneId: taskMilestoneId || undefined,
+        dueDate: taskDueDate || undefined,
+        status: 'TODO',
+      });
+      setTaskTitle('');
+      setShowTaskModal(false);
+      showToast('Task created successfully');
+      await loadProjectDetails(selectedProject.id);
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.response?.data?.error || 'Failed to create task', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleUpdateTaskStatus = async (taskId: string, newStatus: 'TODO' | 'IN_PROGRESS' | 'REVIEW' | 'COMPLETED') => {
+    if (!selectedProject) return;
+    try {
+      await api.put(`/tasks/${taskId}`, { status: newStatus });
+      showToast(`Task moved to ${newStatus.replace('_', ' ')}`);
+      await loadProjectDetails(selectedProject.id);
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to update task status', 'error');
     }
   };
 
@@ -467,7 +493,7 @@ export default function Projects() {
       setAiAnalysisResult(res.data.analysis);
     } catch (err: any) {
       console.error(err);
-      showToast(err.response?.data?.error || 'Gemini is unavailable; no requirements analysis was generated.', 'error');
+      showToast(err.response?.data?.error || 'ProjectCollab AI is unavailable; no requirements analysis was generated.', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -595,6 +621,15 @@ export default function Projects() {
     return { total, healthy, attention, risk };
   }, [projects]);
 
+  // Selected project progress metrics
+  const totalMilestones = selectedProject?.milestones?.length || 0;
+  const completedMilestones = selectedProject?.milestones?.filter(m => m.status === 'COMPLETED').length || 0;
+  const milestonePct = totalMilestones > 0 ? Math.round((completedMilestones / totalMilestones) * 100) : 0;
+
+  const totalTasks = selectedProject?.tasks?.length || 0;
+  const completedTasks = selectedProject?.tasks?.filter(t => t.status === 'COMPLETED').length || 0;
+  const taskPct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
   // Filtered projects
   const filteredProjects = projects.filter(p => {
     const matchesSearch = p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -648,18 +683,11 @@ export default function Projects() {
               </p>
               <h1 className="text-3xl font-extrabold text-white tracking-tight">Projects</h1>
               <p className="text-slate-500 text-sm mt-1">
-                Collaborative academic project workspaces tracked with AI risk detectors and commits engines.
+                Collaborative project workspaces with task management, GitHub activity tracking, and intelligent project insights.
               </p>
             </div>
             <button
-              onClick={() => {
-                if (teams.length === 0) {
-                  alert('You must create a team workspace in the "Teams" tab before initiating a project.');
-                  return;
-                }
-                setSelectedTeamId(teams[0].id);
-                setShowCreateModal(true);
-              }}
+              onClick={() => setShowCreateModal(true)}
               className="flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold rounded-xl transition-all cursor-pointer shadow-lg"
             >
               <Plus className="w-4 h-4" /> New Project
@@ -786,57 +814,167 @@ export default function Projects() {
       ) : (
         // ----------------- STATE 2: DETAILED WORKSPACE VIEW -----------------
         <div className="space-y-8 animate-fade-in">
-          {/* Breadcrumb / Back button */}
-          <div className="flex items-center gap-2 text-xs">
-            <Link to="/projects" className="text-slate-500 hover:text-white transition-colors flex items-center gap-1.5">
-              <ArrowLeft className="w-3.5 h-3.5" /> Back to Workspaces
-            </Link>
-            <ChevronRight className="w-3 h-3 text-slate-700" />
-            <span className="text-slate-300 font-mono truncate max-w-64">{selectedProject.title}</span>
+          {/* Breadcrumb / Back button & Project Switcher */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2">
+              <Link to="/projects" className="text-slate-500 hover:text-white transition-colors flex items-center gap-1.5">
+                <ArrowLeft className="w-3.5 h-3.5" /> Back to Workspaces
+              </Link>
+              <ChevronRight className="w-3 h-3 text-slate-700" />
+              <span className="text-slate-300 font-mono truncate max-w-64">{selectedProject.title}</span>
+            </div>
+
+            {/* Quick Project Switcher Dropdown */}
+            {projects.length > 1 && (
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 text-[11px] font-medium">Switch Project:</span>
+                <select
+                  value={selectedProject.id}
+                  onChange={(e) => {
+                    const nextId = e.target.value;
+                    if (nextId) {
+                      useProjectStore.getState().switchProject(nextId);
+                      navigate(`/projects/${nextId}`);
+                      loadProjectDetails(nextId);
+                    }
+                  }}
+                  className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-300 outline-none cursor-pointer focus:border-primary/50"
+                >
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id} className="bg-slate-950">
+                      {p.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Project Banner */}
           <div className="glass-panel rounded-2xl p-6 relative overflow-hidden border border-slate-800">
             <div className="absolute top-0 right-0 w-64 h-64 rounded-full bg-primary/5 blur-3xl -translate-y-16 translate-x-16" />
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative">
-              <div className="space-y-2">
+              <div className="space-y-3 flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold uppercase tracking-wider ${statusConfig[selectedProject.status]?.color} ${statusConfig[selectedProject.status]?.bg}`}>
+                  <span className={`text-[10px] px-2.5 py-0.5 rounded-md font-bold uppercase tracking-wider ${statusConfig[selectedProject.status]?.color} ${statusConfig[selectedProject.status]?.bg}`}>
                     {statusConfig[selectedProject.status]?.label}
                   </span>
                   {selectedProject.githubRepo && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-[10px] font-mono text-slate-400">
-                      <Github className="w-3 h-3 text-white" />
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-[10px] font-mono text-slate-300">
+                      <Github className="w-3 h-3 text-slate-400" />
                       {selectedProject.githubRepo}
                     </span>
                   )}
+                  {selectedProject.startDate && selectedProject.endDate && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-900/60 border border-slate-800 text-[10px] text-slate-400">
+                      <Clock className="w-2.5 h-2.5" />
+                      {new Date(selectedProject.startDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} → {new Date(selectedProject.endDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    </span>
+                  )}
                 </div>
+
                 <h2 className="text-2xl font-bold text-white tracking-tight">{selectedProject.title}</h2>
                 <p className="text-xs text-slate-400 max-w-3xl leading-relaxed">{selectedProject.description}</p>
+
+                {/* Project Context & Relationship Bar */}
+                <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-slate-450">
+                  <div className="flex items-center gap-1.5 bg-slate-900/60 border border-slate-850 px-2.5 py-1.5 rounded-lg">
+                    <Users className="w-3.5 h-3.5 text-primary" />
+                    <span className="text-slate-400 font-medium">Team:</span>
+                    <span className="text-slate-200 font-semibold">{selectedProject.team?.name || 'Unassigned'}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-slate-900/60 border border-slate-850 px-2.5 py-1.5 rounded-lg">
+                    <Users className="w-3.5 h-3.5 text-slate-400" />
+                    <span className="text-slate-200 font-semibold">{selectedProject.team?.members?.length || 1}</span>
+                    <span className="text-slate-400">members</span>
+                  </div>
+
+                  {/* Milestone Progress Bar */}
+                  <div className="flex items-center gap-2 bg-slate-900/60 border border-slate-850 px-3 py-1.5 rounded-lg min-w-44">
+                    <Calendar className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-center text-[10px] mb-1">
+                        <span className="text-slate-400 font-medium">Milestones</span>
+                        <span className="text-slate-200 font-bold">{completedMilestones}/{totalMilestones} ({milestonePct}%)</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-amber-400 rounded-full transition-all duration-500" style={{ width: `${milestonePct}%` }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Task Progress Bar */}
+                  <div className="flex items-center gap-2 bg-slate-900/60 border border-slate-850 px-3 py-1.5 rounded-lg min-w-44">
+                    <CheckSquare className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-center text-[10px] mb-1">
+                        <span className="text-slate-400 font-medium">Tasks</span>
+                        <span className="text-slate-200 font-bold">{completedTasks}/{totalTasks} ({taskPct}%)</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-emerald-400 rounded-full transition-all duration-500" style={{ width: `${taskPct}%` }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* GitHub Connection */}
+                  <div className="flex items-center gap-1.5 bg-slate-900/60 border border-slate-850 px-2.5 py-1.5 rounded-lg">
+                    <Github className="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />
+                    <span className="text-slate-400 font-medium">GitHub:</span>
+                    <span className="text-slate-200 font-mono text-[11px] truncate max-w-40">
+                      {selectedProject.githubRepo || 'Not Connected'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Tech stack chips */}
+                {selectedProject.techStack && selectedProject.techStack.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    {selectedProject.techStack.map((tech) => (
+                      <span key={tech} className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary font-mono">
+                        <Tag className="w-2.5 h-2.5 text-primary/70" /> {tech}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              <div className="text-center bg-slate-950/40 border border-slate-900 p-4 rounded-xl flex-shrink-0 min-w-32">
+              {/* Clickable Project Health Box */}
+              <button
+                type="button"
+                onClick={() => setShowHealthModal(true)}
+                className="text-center bg-slate-950/60 hover:bg-slate-900 border border-slate-800 hover:border-primary/40 p-4 rounded-2xl flex-shrink-0 min-w-32 transition-all cursor-pointer group shadow-lg"
+                title="Click to view full health score calculation breakdown"
+              >
                 <p className={`text-4xl font-black ${selectedProject.healthScore >= 75 ? 'text-emerald-450' : selectedProject.healthScore >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
                   {selectedProject.healthScore}%
                 </p>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-1">Project Health</p>
-              </div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-1 flex items-center justify-center gap-1">
+                  Project Health
+                </p>
+                <span className="text-[9px] text-primary/80 group-hover:text-primary mt-1 font-medium block">
+                  Click for breakdown →
+                </span>
+              </button>
             </div>
           </div>
 
           {/* Tabs Navigation */}
           <div className="flex items-center gap-1.5 p-1 bg-slate-950/60 border border-slate-900 rounded-xl overflow-x-auto w-fit max-w-full" style={{ scrollbarWidth: 'none' }}>
             {[
-              { id: 'overview', label: 'Overview', icon: FolderOpen },
-              { id: 'milestones', label: 'Milestones', icon: Calendar },
-              { id: 'docs', label: 'Documents & AI', icon: FileText },
-              { id: 'git', label: 'GitHub Sync', icon: Github },
-              { id: 'ai', label: 'AI Analytics', icon: Brain },
-              { id: 'settings', label: 'Settings', icon: SettingsIcon },
+              { id: 'overview' as ProjectTab, label: 'Overview', icon: FolderOpen },
+              { id: 'tasks' as ProjectTab, label: `Tasks (${totalTasks})`, icon: CheckSquare },
+              { id: 'milestones' as ProjectTab, label: `Milestones (${totalMilestones})`, icon: Calendar },
+              { id: 'team' as ProjectTab, label: `Team (${selectedProject.team?.members?.length || 1})`, icon: Users },
+              { id: 'git' as ProjectTab, label: 'GitHub', icon: Github },
+              { id: 'analytics' as ProjectTab, label: 'Analytics', icon: BarChart3 },
+              { id: 'ai' as ProjectTab, label: 'Project Intelligence', icon: Brain },
+              { id: 'docs' as ProjectTab, label: 'Documents', icon: FileText },
+              { id: 'settings' as ProjectTab, label: 'Settings', icon: SettingsIcon },
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => handleTabChange(tab.id)}
                 className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
                   activeTab === tab.id
                     ? 'bg-primary text-primary-foreground shadow'
@@ -942,6 +1080,183 @@ export default function Projects() {
                       <p className="text-[10px] text-slate-500">No scheduled coordinator link detected.</p>
                     )}
                   </div>
+
+                  {/* Quick Project Tool Links */}
+                  <div className="glass-card rounded-2xl p-5 border border-slate-900 space-y-2.5">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Project Work Tools</h4>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Link
+                          to={`/tasks?project=${selectedProject.id}`}
+                          className="flex items-center gap-2 p-2.5 bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800 rounded-xl text-xs font-medium text-slate-300 hover:text-white transition-all"
+                        >
+                          <CheckCircle className="w-3.5 h-3.5 text-indigo-400" />
+                          Kanban Board
+                        </Link>
+                        <Link
+                          to={`/github?project=${selectedProject.id}`}
+                          className="flex items-center gap-2 p-2.5 bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800 rounded-xl text-xs font-medium text-slate-300 hover:text-white transition-all"
+                        >
+                          <Github className="w-3.5 h-3.5 text-sky-400" />
+                          GitHub Repo
+                        </Link>
+                        <Link
+                          to={`/ai-pm?project=${selectedProject.id}`}
+                          className="flex items-center gap-2 p-2.5 bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800 rounded-xl text-xs font-medium text-slate-300 hover:text-white transition-all"
+                        >
+                          <Brain className="w-3.5 h-3.5 text-purple-400" />
+                          AI PM Insights
+                        </Link>
+                        <Link
+                          to={`/analytics?project=${selectedProject.id}`}
+                          className="flex items-center gap-2 p-2.5 bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800 rounded-xl text-xs font-medium text-slate-300 hover:text-white transition-all"
+                        >
+                          <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                          Analytics
+                        </Link>
+                      </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* VIEW: PROJECT TASKS KANBAN */}
+            {activeTab === 'tasks' && (
+              <div className="space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      <CheckSquare className="w-4 h-4 text-primary" />
+                      Project Tasks Board
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      All tasks belonging strictly to <span className="text-white font-medium">{selectedProject.title}</span>.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Link
+                      to={`/tasks?project=${selectedProject.id}`}
+                      className="px-3 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-xl transition-all inline-flex items-center gap-1.5"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" /> Open Full Board
+                    </Link>
+                    <button
+                      onClick={() => setShowTaskModal(true)}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Task
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filter and stats row */}
+                <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-slate-950/40 border border-slate-900 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <Search className="w-3.5 h-3.5 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Filter project tasks..."
+                      value={taskSearchQuery}
+                      onChange={(e) => setTaskSearchQuery(e.target.value)}
+                      className="bg-transparent text-xs text-white placeholder:text-slate-600 outline-none w-48"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-500 font-medium">Filter Status:</span>
+                    {['ALL', 'TODO', 'IN_PROGRESS', 'REVIEW', 'COMPLETED'].map((st) => (
+                      <button
+                        key={st}
+                        onClick={() => setTaskFilterStatus(st)}
+                        className={`text-[10px] px-2.5 py-1 rounded-lg font-semibold transition-all ${
+                          taskFilterStatus === st
+                            ? 'bg-primary text-primary-foreground shadow'
+                            : 'text-slate-400 hover:text-white bg-slate-900/60 border border-slate-800'
+                        }`}
+                      >
+                        {st === 'ALL' ? 'All' : st.replace('_', ' ')}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 4 Kanban Columns */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    { id: 'TODO', title: 'To Do', border: 'border-slate-700', bg: 'bg-slate-900/20' },
+                    { id: 'IN_PROGRESS', title: 'In Progress', border: 'border-blue-500/40', bg: 'bg-blue-500/5' },
+                    { id: 'REVIEW', title: 'In Review', border: 'border-purple-500/40', bg: 'bg-purple-500/5' },
+                    { id: 'COMPLETED', title: 'Done', border: 'border-emerald-500/40', bg: 'bg-emerald-500/5' },
+                  ].map((col) => {
+                    const colTasks = (selectedProject.tasks || [])
+                      .filter((t) => t.status === col.id)
+                      .filter(() => taskFilterStatus === 'ALL' || taskFilterStatus === col.id)
+                      .filter((t) => !taskSearchQuery || t.title.toLowerCase().includes(taskSearchQuery.toLowerCase()));
+
+                    return (
+                      <div key={col.id} className={`p-4 rounded-2xl border ${col.border} ${col.bg} flex flex-col min-h-[350px]`}>
+                        <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-800/80">
+                          <span className="text-xs font-bold text-white tracking-wide">{col.title}</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-bold">
+                            {colTasks.length}
+                          </span>
+                        </div>
+
+                        <div className="space-y-2.5 flex-1 overflow-y-auto max-h-[500px] pr-1">
+                          {colTasks.length === 0 ? (
+                            <div className="h-28 flex items-center justify-center border border-dashed border-slate-800/60 rounded-xl text-[11px] text-slate-600">
+                              No tasks
+                            </div>
+                          ) : (
+                            colTasks.map((task) => (
+                              <div
+                                key={task.id}
+                                className="p-3 bg-slate-950/80 hover:bg-slate-900 border border-slate-850 hover:border-slate-750 rounded-xl transition-all shadow-sm group"
+                              >
+                                <div className="flex items-start justify-between gap-2 mb-1.5">
+                                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                                    task.priority === 'HIGH' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                                    task.priority === 'MEDIUM' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                                    'bg-slate-800 text-slate-400'
+                                  }`}>
+                                    {task.priority}
+                                  </span>
+                                  {task.dueDate && (
+                                    <span className="text-[9px] text-slate-500 flex items-center gap-1 font-mono">
+                                      <Clock className="w-2.5 h-2.5" />
+                                      {new Date(task.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <p className="text-xs font-semibold text-slate-200 leading-snug mb-2">{task.title}</p>
+
+                                <div className="flex items-center justify-between pt-2 border-t border-slate-900/60 mt-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <div className="w-5 h-5 rounded-full bg-slate-800 flex items-center justify-center text-[9px] font-bold text-slate-300">
+                                      {task.assignee?.name?.charAt(0).toUpperCase() || '?'}
+                                    </div>
+                                    <span className="text-[10px] text-slate-400 truncate max-w-24">
+                                      {task.assignee?.name || 'Unassigned'}
+                                    </span>
+                                  </div>
+
+                                  <select
+                                    value={task.status}
+                                    onChange={(e) => handleUpdateTaskStatus(task.id, e.target.value as any)}
+                                    className="bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 text-[10px] text-slate-300 outline-none cursor-pointer"
+                                  >
+                                    <option value="TODO">To Do</option>
+                                    <option value="IN_PROGRESS">In Progress</option>
+                                    <option value="REVIEW">In Review</option>
+                                    <option value="COMPLETED">Done</option>
+                                  </select>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -949,10 +1264,10 @@ export default function Projects() {
             {/* VIEW 2: MILESTONES */}
             {activeTab === 'milestones' && (
               <div className="space-y-6">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <h3 className="text-base font-bold text-white">Project Milestones</h3>
-                    <p className="text-xs text-slate-500 mt-0.5">Define milestones and click to toggle their progress status.</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Track key delivery targets and see contributing tasks.</p>
                   </div>
                   <button
                     onClick={() => setShowMilestoneModal(true)}
@@ -962,59 +1277,249 @@ export default function Projects() {
                   </button>
                 </div>
 
+                {/* Milestone Summary KPIs */}
+                {selectedProject.milestones && selectedProject.milestones.length > 0 && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="p-3.5 bg-slate-900/40 border border-slate-850 rounded-xl">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total Milestones</p>
+                      <p className="text-xl font-extrabold text-white mt-0.5">{selectedProject.milestones.length}</p>
+                    </div>
+                    <div className="p-3.5 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Completed</p>
+                      <p className="text-xl font-extrabold text-emerald-400 mt-0.5">
+                        {selectedProject.milestones.filter(m => m.status === 'COMPLETED').length}
+                      </p>
+                    </div>
+                    <div className="p-3.5 bg-blue-500/5 border border-blue-500/20 rounded-xl">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-blue-400">In Progress</p>
+                      <p className="text-xl font-extrabold text-blue-400 mt-0.5">
+                        {selectedProject.milestones.filter(m => m.status === 'IN_PROGRESS').length}
+                      </p>
+                    </div>
+                    <div className="p-3.5 bg-rose-500/5 border border-rose-500/20 rounded-xl">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-rose-400">Overdue</p>
+                      <p className="text-xl font-extrabold text-rose-400 mt-0.5">
+                        {selectedProject.milestones.filter(m => m.status !== 'COMPLETED' && new Date(m.dueDate) < new Date()).length}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {(!selectedProject.milestones || selectedProject.milestones.length === 0) ? (
                   <div className="glass-panel rounded-2xl p-12 text-center text-slate-500">
                     <Calendar className="w-10 h-10 text-slate-700 mx-auto mb-3" />
-                    <span>No milestones scheduled yet.</span>
+                    <p className="text-sm font-semibold text-slate-300">No milestones scheduled yet.</p>
+                    <p className="text-xs text-slate-500 mt-1">Break your project down into milestones to track completion velocity.</p>
                   </div>
                 ) : (
                   <div className="space-y-4">
                     {selectedProject.milestones.map((m) => {
                       const isCompleted = m.status === 'COMPLETED';
                       const isInProgress = m.status === 'IN_PROGRESS';
+                      const isPastDue = !isCompleted && new Date(m.dueDate) < new Date();
+
+                      // Contributing tasks
+                      const milestoneTasks = (selectedProject.tasks || []).filter(t => t.milestoneId === m.id);
+                      const doneTasks = milestoneTasks.filter(t => t.status === 'COMPLETED').length;
+                      const progress = milestoneTasks.length > 0
+                        ? Math.round((doneTasks / milestoneTasks.length) * 100)
+                        : (isCompleted ? 100 : 0);
 
                       return (
                         <div
                           key={m.id}
-                          onClick={() => handleUpdateMilestoneStatus(m.id, m.status)}
-                          className={`p-5 rounded-2xl border transition-all cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4 group ${
+                          className={`p-5 rounded-2xl border transition-all flex flex-col gap-4 ${
                             isCompleted
-                              ? 'bg-slate-950/20 border-slate-900 opacity-60 hover:opacity-90'
+                              ? 'bg-slate-950/30 border-slate-900 opacity-75'
+                              : isPastDue
+                              ? 'glass-panel border-rose-500/30 bg-rose-500/5'
                               : isInProgress
                               ? 'glass-panel border-primary/40'
                               : 'glass-card border-slate-900 hover:border-slate-800'
                           }`}
                         >
-                          <div className="flex items-start gap-4">
-                            <div className={`p-2.5 rounded-xl flex-shrink-0 mt-0.5 ${isCompleted ? 'bg-slate-900' : 'bg-primary/10'}`}>
-                              <Calendar className={`w-4 h-4 ${isCompleted ? 'text-slate-500' : 'text-primary'}`} />
+                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div className="flex items-start gap-4">
+                              <div className={`p-2.5 rounded-xl flex-shrink-0 mt-0.5 ${
+                                isCompleted ? 'bg-emerald-500/10 text-emerald-400' : isPastDue ? 'bg-rose-500/15 text-rose-400' : 'bg-primary/10 text-primary'
+                              }`}>
+                                <Target className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h4 className={`font-bold text-sm ${isCompleted ? 'text-slate-400 line-through' : 'text-white'}`}>{m.title}</h4>
+                                  {isPastDue && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold border border-rose-500/30">
+                                      Overdue
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-slate-400 mt-1 leading-relaxed">{m.description || 'No description provided.'}</p>
+                                <p className="text-[10px] text-slate-500 mt-1.5 font-mono">
+                                  DUE: {new Date(m.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </p>
+                              </div>
                             </div>
-                            <div>
-                              <h4 className={`font-bold text-sm ${isCompleted ? 'text-slate-500 line-through' : 'text-white'}`}>{m.title}</h4>
-                              <p className="text-xs text-slate-450 mt-1 leading-relaxed">{m.description || 'No description provided.'}</p>
-                              <p className="text-[10px] text-slate-600 mt-2 font-mono">DUE DATE: {new Date(m.dueDate).toLocaleDateString()}</p>
+
+                            <div className="flex items-center gap-3 justify-end flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateMilestoneStatus(m.id, m.status)}
+                                className={`text-[10px] px-3 py-1.5 rounded-xl border font-bold uppercase tracking-wider cursor-pointer transition-all ${
+                                  isCompleted
+                                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                                    : isInProgress
+                                    ? 'bg-primary/10 border-primary/30 text-primary hover:bg-primary/20'
+                                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800'
+                                }`}
+                                title="Click to cycle status"
+                              >
+                                {m.status.replace('_', ' ')}
+                              </button>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-3 justify-end">
-                            <span className={`text-[10px] px-2.5 py-1 rounded-lg border font-bold uppercase tracking-wider ${
-                              isCompleted
-                                ? 'bg-slate-900 border-slate-800 text-slate-500'
-                                : isInProgress
-                                ? 'bg-primary/10 border-primary/20 text-primary'
-                                : 'bg-slate-900 border-slate-800 text-slate-400'
-                            }`}>
-                              {m.status.replace('_', ' ')}
-                            </span>
-                            <span className="text-[10px] text-slate-600 group-hover:text-slate-400 transition-colors hidden md:inline">
-                              Click to cycle status
-                            </span>
+                          {/* Progress bar */}
+                          <div className="space-y-1.5 pt-2 border-t border-slate-900/60">
+                            <div className="flex justify-between text-[11px]">
+                              <span className="text-slate-400 font-medium">
+                                Milestone Progress ({doneTasks} / {milestoneTasks.length} tasks completed)
+                              </span>
+                              <span className="font-bold text-white">{progress}%</span>
+                            </div>
+                            <div className="w-full bg-slate-950 rounded-full h-1.5">
+                              <div
+                                className={`h-1.5 rounded-full transition-all duration-500 ${
+                                  progress === 100
+                                    ? 'bg-emerald-500'
+                                    : isPastDue
+                                    ? 'bg-rose-500'
+                                    : 'bg-primary'
+                                }`}
+                                style={{ width: `${progress}%` }}
+                              />
+                            </div>
                           </div>
+
+                          {/* Contributing Tasks List */}
+                          {milestoneTasks.length > 0 ? (
+                            <div className="pt-2 space-y-1.5">
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Contributing Tasks ({milestoneTasks.length})</p>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                {milestoneTasks.map((t) => (
+                                  <div key={t.id} className="flex items-center justify-between p-2.5 bg-slate-950/40 rounded-xl border border-slate-900 text-xs">
+                                    <div className="flex items-center gap-2 truncate flex-1 min-w-0 mr-2">
+                                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                                        t.priority === 'HIGH' ? 'bg-rose-500' : t.priority === 'MEDIUM' ? 'bg-amber-500' : 'bg-slate-500'
+                                      }`} />
+                                      <span className={`truncate ${t.status === 'COMPLETED' ? 'text-slate-500 line-through' : 'text-slate-200'}`}>
+                                        {t.title}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                      {t.assignee && (
+                                        <span className="text-[10px] text-slate-400 truncate max-w-[90px]">{t.assignee.name}</span>
+                                      )}
+                                      <span className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase ${
+                                        t.status === 'COMPLETED'
+                                          ? 'bg-emerald-500/10 text-emerald-400'
+                                          : t.status === 'IN_PROGRESS'
+                                          ? 'bg-blue-500/10 text-blue-400'
+                                          : 'bg-slate-900 text-slate-400'
+                                      }`}>
+                                        {t.status.replace('_', ' ')}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-slate-500 italic pt-1">
+                              No tasks linked to this milestone yet. Assign this milestone to tasks on the Tasks board.
+                            </p>
+                          )}
                         </div>
                       );
                     })}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* VIEW: PROJECT TEAM & MEMBERS */}
+            {activeTab === 'team' && (
+              <div className="space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      <Users className="w-4 h-4 text-primary" />
+                      Project Team Roster
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Members assigned to work on <span className="text-white font-medium">{selectedProject.title}</span> under workspace team <span className="text-primary font-semibold">{selectedProject.team?.name}</span>.
+                    </p>
+                  </div>
+                  <Link
+                    to="/teams"
+                    className="px-3.5 py-2 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 hover:text-white text-xs font-semibold rounded-xl transition-all self-start flex items-center gap-1.5"
+                  >
+                    <Users className="w-3.5 h-3.5 text-primary" /> Manage Team Workspace →
+                  </Link>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {(selectedProject.team?.members || []).map((m, idx) => {
+                    const memberTasks = (selectedProject.tasks || []).filter((t) => t.assignee?.id === m.user.id);
+                    const completedMemberTasks = memberTasks.filter((t) => t.status === 'COMPLETED').length;
+                    const memberTaskPct = memberTasks.length > 0 ? Math.round((completedMemberTasks / memberTasks.length) * 100) : 0;
+
+                    return (
+                      <div key={idx} className="glass-panel rounded-2xl p-5 border border-slate-850 flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-start justify-between gap-3 mb-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-sm font-bold text-primary">
+                                {m.user.name.charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <p className="text-sm font-bold text-white leading-snug">{m.user.name}</p>
+                                <p className="text-xs text-slate-400 truncate max-w-[180px]">{m.user.email}</p>
+                              </div>
+                            </div>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider bg-slate-800 text-slate-300 border border-slate-700">
+                              {m.role}
+                            </span>
+                          </div>
+
+                          {/* Member skills */}
+                          {m.user.skills && m.user.skills.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mb-4">
+                              {m.user.skills.slice(0, 4).map((skill, sIdx) => (
+                                <span key={sIdx} className="text-[9px] px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400 font-mono">
+                                  {skill}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Member Project Workload */}
+                        <div className="pt-3 border-t border-slate-900 space-y-1.5">
+                          <div className="flex justify-between text-[11px]">
+                            <span className="text-slate-400">Assigned Workload</span>
+                            <span className="font-semibold text-slate-200">
+                              {completedMemberTasks}/{memberTasks.length} tasks ({memberTaskPct}%)
+                            </span>
+                          </div>
+                          <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+                            <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${memberTaskPct}%` }} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
@@ -1284,7 +1789,121 @@ export default function Projects() {
               </div>
             )}
 
-            {/* VIEW 5: AI ANALYTICS */}
+            {/* VIEW: PROJECT ANALYTICS */}
+            {activeTab === 'analytics' && (
+              <div className="space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-emerald-400" />
+                      Project Analytics & Metrics
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Detailed delivery and execution metrics scoped strictly to <span className="text-white font-medium">{selectedProject.title}</span>.
+                    </p>
+                  </div>
+                  <Link
+                    to="/analytics"
+                    className="px-3.5 py-2 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 hover:text-white text-xs font-semibold rounded-xl transition-all self-start flex items-center gap-1.5"
+                  >
+                    <BarChart3 className="w-3.5 h-3.5 text-emerald-400" /> Cross-Project Global Analytics →
+                  </Link>
+                </div>
+
+                {/* Metric Summary Cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="glass-card rounded-2xl p-5 border border-slate-900">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Health Index</p>
+                    <p className={`text-3xl font-black mt-1 ${selectedProject.healthScore >= 75 ? 'text-emerald-400' : selectedProject.healthScore >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                      {selectedProject.healthScore}%
+                    </p>
+                    <span className="text-[10px] text-slate-400 font-medium">
+                      Status: {selectedProject.status}
+                    </span>
+                  </div>
+
+                  <div className="glass-card rounded-2xl p-5 border border-slate-900">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Task Completion</p>
+                    <p className="text-3xl font-black text-white mt-1">{taskPct}%</p>
+                    <span className="text-[10px] text-slate-400 font-medium">
+                      {completedTasks} of {totalTasks} finished
+                    </span>
+                  </div>
+
+                  <div className="glass-card rounded-2xl p-5 border border-slate-900">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Milestone Velocity</p>
+                    <p className="text-3xl font-black text-amber-400 mt-1">{milestonePct}%</p>
+                    <span className="text-[10px] text-slate-400 font-medium">
+                      {completedMilestones} of {totalMilestones} reached
+                    </span>
+                  </div>
+
+                  <div className="glass-card rounded-2xl p-5 border border-slate-900">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Team Size</p>
+                    <p className="text-3xl font-black text-indigo-400 mt-1">{selectedProject.team?.members?.length || 1}</p>
+                    <span className="text-[10px] text-slate-400 font-medium">
+                      Active Collaborators
+                    </span>
+                  </div>
+                </div>
+
+                {/* Status & Priority Breakdown */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Task Status Breakdown */}
+                  <div className="glass-panel rounded-2xl p-6 border border-slate-900 space-y-4">
+                    <h4 className="text-sm font-bold text-white">Task Status Breakdown</h4>
+                    <div className="space-y-3">
+                      {[
+                        { label: 'To Do', count: (selectedProject.tasks || []).filter(t => t.status === 'TODO').length, color: 'bg-slate-500' },
+                        { label: 'In Progress', count: (selectedProject.tasks || []).filter(t => t.status === 'IN_PROGRESS').length, color: 'bg-blue-500' },
+                        { label: 'In Review', count: (selectedProject.tasks || []).filter(t => t.status === 'REVIEW').length, color: 'bg-purple-500' },
+                        { label: 'Completed', count: (selectedProject.tasks || []).filter(t => t.status === 'COMPLETED').length, color: 'bg-emerald-500' },
+                      ].map((item) => {
+                        const pct = totalTasks > 0 ? Math.round((item.count / totalTasks) * 100) : 0;
+                        return (
+                          <div key={item.label} className="space-y-1">
+                            <div className="flex justify-between text-xs">
+                              <span className="text-slate-300 font-medium">{item.label}</span>
+                              <span className="text-slate-400">{item.count} tasks ({pct}%)</span>
+                            </div>
+                            <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
+                              <div className={`h-full ${item.color} rounded-full`} style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Task Priority Distribution */}
+                  <div className="glass-panel rounded-2xl p-6 border border-slate-900 space-y-4">
+                    <h4 className="text-sm font-bold text-white">Task Priority Distribution</h4>
+                    <div className="space-y-3">
+                      {[
+                        { label: 'High Priority', count: (selectedProject.tasks || []).filter(t => t.priority === 'HIGH').length, color: 'bg-red-500' },
+                        { label: 'Medium Priority', count: (selectedProject.tasks || []).filter(t => t.priority === 'MEDIUM').length, color: 'bg-amber-500' },
+                        { label: 'Low Priority', count: (selectedProject.tasks || []).filter(t => t.priority === 'LOW').length, color: 'bg-slate-400' },
+                      ].map((item) => {
+                        const pct = totalTasks > 0 ? Math.round((item.count / totalTasks) * 100) : 0;
+                        return (
+                          <div key={item.label} className="space-y-1">
+                            <div className="flex justify-between text-xs">
+                              <span className="text-slate-300 font-medium">{item.label}</span>
+                              <span className="text-slate-400">{item.count} tasks ({pct}%)</span>
+                            </div>
+                            <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
+                              <div className={`h-full ${item.color} rounded-full`} style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* VIEW 5: PROJECT INTELLIGENCE */}
             {activeTab === 'ai' && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 {/* Left pane: Delay predictor */}
@@ -1455,120 +2074,17 @@ export default function Projects() {
         </div>
       )}
 
-      {/* CREATE PROJECT MODAL */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="glass-panel rounded-2xl p-6 w-full max-w-lg border-slate-700 shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-bold text-white">Create Project Workspace</h2>
-              <button onClick={() => setShowCreateModal(false)} className="p-2 rounded-xl hover:bg-slate-800 text-slate-400 transition-colors">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateProject} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-2">Team Allocation</label>
-                <select
-                  value={selectedTeamId}
-                  onChange={(e) => setSelectedTeamId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white transition-all cursor-pointer"
-                  required
-                >
-                  <option value="" disabled>Select Roster Team</option>
-                  {teams.map((t) => (
-                    <option key={t.id} value={t.id} className="bg-slate-950">{t.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-2">Project Title</label>
-                <input
-                  type="text"
-                  placeholder="e.g. AI-Powered Course Helper"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-sm text-white placeholder:text-slate-600 focus:border-primary/50 outline-none transition-all font-semibold"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-2">Description</label>
-                <textarea
-                  placeholder="Summarize the core targets of this academic project module..."
-                  value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
-                  rows={3}
-                  className="w-full px-4 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-sm text-white placeholder:text-slate-650 focus:border-primary/50 outline-none transition-all resize-none leading-relaxed"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-2">GitHub Repo Path (Optional)</label>
-                <input
-                  type="text"
-                  placeholder="owner/repo (e.g. facebook/react)"
-                  value={newGithubRepo}
-                  onChange={(e) => setNewGithubRepo(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-sm text-white placeholder:text-slate-650 focus:border-primary/50 outline-none transition-all font-mono"
-                />
-              </div>
-
-              {/* Objectives lists tags */}
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">Project Core Objectives</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="e.g. Complete responsive UI components list"
-                    value={objectiveInput}
-                    onChange={(e) => setObjectiveInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && addObjective(e)}
-                    className="flex-1 px-4 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-sm text-white placeholder:text-slate-650 focus:border-primary/50 outline-none transition-all"
-                  />
-                  <button
-                    type="button"
-                    onClick={addObjective}
-                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl transition-all cursor-pointer border border-slate-700"
-                  >
-                    Add
-                  </button>
-                </div>
-
-                {newObjectives.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-1.5 p-2 bg-slate-950/30 border border-slate-900 rounded-xl">
-                    {newObjectives.map((obj, i) => (
-                      <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-850 border border-slate-800 text-slate-250 text-xs rounded-lg">
-                        {obj}
-                        <button type="button" onClick={() => removeObjective(obj)} className="text-slate-400 hover:text-white font-bold">✕</button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex gap-3 pt-4 border-t border-slate-900">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="flex-1 py-2.5 border border-slate-750 text-slate-400 text-xs font-semibold rounded-xl hover:bg-slate-850 transition-all"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={actionLoading}
-                  className="flex-1 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5"
-                >
-                  {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Create Workspace'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* 8-STEP PROJECT CREATION WIZARD */}
+      <CreateProjectWizard
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSuccess={(createdProject) => {
+          setShowCreateModal(false);
+          showToast(`✅ Project workspace created successfully!`);
+          navigate(`/projects/${createdProject.id}`);
+          loadInitialData();
+        }}
+      />
 
       {/* ADD MILESTONE MODAL */}
       {showMilestoneModal && (
@@ -1779,6 +2295,276 @@ export default function Projects() {
                   className="flex-1 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5"
                 >
                   {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><Upload className="w-3.5 h-3.5" /> Upload</>}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Health Score Breakdown Modal ─── */}
+      {showHealthModal && selectedProject && (() => {
+        const totalTasks = selectedProject.tasks?.length || 0;
+        const completedTasks = selectedProject.tasks?.filter(t => t.status === 'COMPLETED').length || 0;
+        const taskCompletionPct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 100;
+        const taskScore = Math.round(taskCompletionPct * 0.5);
+
+        const commitsCount = (selectedProject.gitAnalytics as any)?.commitsCount || 0;
+        const commitRatio = Math.min(Math.round((commitsCount / 15) * 100), 100);
+        const commitScore = Math.round(commitRatio * 0.3);
+
+        const chatScore = 20; // Placeholder: chat activity capped at 20 pts
+
+        const overdueTasksCount = selectedProject.tasks?.filter(t =>
+          t.status !== 'COMPLETED' && t.dueDate && new Date(t.dueDate) < new Date()
+        ).length || 0;
+        const overdueMilestones = selectedProject.milestones?.filter(m =>
+          m.status !== 'COMPLETED' && new Date(m.dueDate) < new Date()
+        ).length || 0;
+        const overduePenalty = Math.min((overdueTasksCount + overdueMilestones) * 10, 30);
+
+        const baseScore = taskScore + commitScore + chatScore;
+        const finalScore = Math.max(0, baseScore - overduePenalty);
+        const scoreColor = finalScore >= 75 ? 'text-emerald-400' : finalScore >= 50 ? 'text-amber-400' : 'text-red-400';
+
+        const barColor = (pct: number) => pct >= 75 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-red-500';
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4" onClick={() => setShowHealthModal(false)}>
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+            <div
+              className="relative w-full max-w-lg glass-panel rounded-2xl p-7 border border-slate-800 shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-primary" />
+                    Health Score Breakdown
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">{selectedProject.title}</p>
+                </div>
+                <div className="text-right">
+                  <p className={`text-4xl font-black ${scoreColor}`}>{finalScore}%</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">
+                    {finalScore >= 75 ? 'HEALTHY' : finalScore >= 50 ? 'NEEDS ATTENTION' : 'AT RISK'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Formula Note */}
+              <p className="text-[11px] text-slate-500 mb-5 italic">
+                Score = (Task Completion × 50%) + (Commit Activity × 30%) + (Team Activity × 20%) − Overdue Penalties
+              </p>
+
+              {/* Breakdown rows */}
+              <div className="space-y-4">
+                {/* Task Completion */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="w-3.5 h-3.5 text-slate-400" />
+                      <span className="text-xs font-semibold text-slate-200">Task Completion</span>
+                      <span className="text-[10px] text-slate-500">(weight: 50%)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400">{completedTasks}/{totalTasks} tasks</span>
+                      <span className="text-xs font-bold text-white">+{taskScore} pts</span>
+                    </div>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full transition-all ${barColor(taskCompletionPct)}`} style={{ width: `${taskCompletionPct}%` }} />
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1">{taskCompletionPct}% completion × 50% weight = {taskScore} pts</p>
+                </div>
+
+                {/* Commit Activity */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <Github className="w-3.5 h-3.5 text-slate-400" />
+                      <span className="text-xs font-semibold text-slate-200">Commit Activity</span>
+                      <span className="text-[10px] text-slate-500">(weight: 30%)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400">{commitsCount} commits</span>
+                      <span className="text-xs font-bold text-white">+{commitScore} pts</span>
+                    </div>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full transition-all ${barColor(commitRatio)}`} style={{ width: `${commitRatio}%` }} />
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1">{commitRatio}% of target (15 commits) × 30% weight = {commitScore} pts</p>
+                </div>
+
+                {/* Team Activity */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <Users className="w-3.5 h-3.5 text-slate-400" />
+                      <span className="text-xs font-semibold text-slate-200">Team Activity</span>
+                      <span className="text-[10px] text-slate-500">(weight: 20%)</span>
+                    </div>
+                    <span className="text-xs font-bold text-white">+{chatScore} pts</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full bg-emerald-500 w-full" />
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1">Collaboration activity baseline × 20% weight = {chatScore} pts</p>
+                </div>
+
+                {/* Overdue Penalty */}
+                {overduePenalty > 0 && (
+                  <div className="border border-red-500/20 bg-red-500/5 rounded-xl p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+                        <span className="text-xs font-semibold text-red-300">Overdue Penalty</span>
+                      </div>
+                      <span className="text-xs font-bold text-red-400">−{overduePenalty} pts</span>
+                    </div>
+                    <p className="text-[10px] text-red-400/70 mt-1.5">
+                      {overdueTasksCount > 0 && `${overdueTasksCount} overdue task${overdueTasksCount !== 1 ? 's' : ''}`}
+                      {overdueTasksCount > 0 && overdueMilestones > 0 && ' · '}
+                      {overdueMilestones > 0 && `${overdueMilestones} overdue milestone${overdueMilestones !== 1 ? 's' : ''}`}
+                      {' · '}−10 pts each (max −30)
+                    </p>
+                  </div>
+                )}
+
+                {/* Divider + Final Score */}
+                <div className="border-t border-slate-800 pt-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-bold text-white">Final Health Score</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500">{taskScore} + {commitScore} + {chatScore}{overduePenalty > 0 ? ` − ${overduePenalty}` : ''}</span>
+                      <span className={`text-xl font-black ${scoreColor}`}>{finalScore}%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="mt-5 flex justify-end">
+                <button
+                  onClick={() => setShowHealthModal(false)}
+                  className="px-5 py-2 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition-all"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Quick Project Task Creation Modal */}
+      {showTaskModal && selectedProject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowTaskModal(false)}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div
+            className="relative w-full max-w-md glass-panel rounded-2xl p-6 border border-slate-800 shadow-2xl space-y-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <CheckSquare className="w-4 h-4 text-primary" /> Create Project Task
+              </h3>
+              <button
+                onClick={() => setShowTaskModal(false)}
+                className="p-1 rounded-lg text-slate-500 hover:text-white transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateTask} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Task Title *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Implement authentication middleware"
+                  value={taskTitle}
+                  onChange={(e) => setTaskTitle(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 outline-none focus:border-primary/50"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Priority</label>
+                  <select
+                    value={taskPriority}
+                    onChange={(e) => setTaskPriority(e.target.value as any)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 outline-none"
+                  >
+                    <option value="LOW">Low</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="HIGH">High</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Due Date</label>
+                  <input
+                    type="date"
+                    value={taskDueDate}
+                    onChange={(e) => setTaskDueDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Assign to Member</label>
+                <select
+                  value={taskAssigneeId}
+                  onChange={(e) => setTaskAssigneeId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 outline-none"
+                >
+                  <option value="">Unassigned</option>
+                  {selectedProject.team?.members?.map((m) => (
+                    <option key={m.user.id} value={m.user.id}>
+                      {m.user.name} ({m.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedProject.milestones && selectedProject.milestones.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Milestone (Optional)</label>
+                  <select
+                    value={taskMilestoneId}
+                    onChange={(e) => setTaskMilestoneId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 outline-none"
+                  >
+                    <option value="">No Milestone</option>
+                    {selectedProject.milestones.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-900">
+                <button
+                  type="button"
+                  onClick={() => setShowTaskModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading || !taskTitle.trim()}
+                  className="px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold transition-all disabled:opacity-50"
+                >
+                  {actionLoading ? 'Creating...' : 'Create Task'}
                 </button>
               </div>
             </form>

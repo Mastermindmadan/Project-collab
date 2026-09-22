@@ -21,6 +21,7 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const OtpVerification = lazy(() => import('./pages/OtpVerification'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const Profile = lazy(() => import('./pages/Profile'));
+const InviteHandler = lazy(() => import('./pages/InviteHandler'));
 
 // Lazy-loaded Main workspace pages
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -70,6 +71,8 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/otp-verification" element={<OtpVerification />} />
           <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/invite/:code" element={<InviteHandler />} />
+          <Route path="/join/:code" element={<InviteHandler />} />
 
           {/* Protected workspace routes */}
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
@@ -82,14 +85,17 @@ export default function App() {
           <Route path="/projects" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
           <Route path="/projects/:id" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
           <Route path="/tasks" element={<ProtectedRoute><TaskBoard /></ProtectedRoute>} />
+          <Route path="/my-tasks" element={<ProtectedRoute><TaskBoard defaultView="MY_TASKS" /></ProtectedRoute>} />
           <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
           <Route path="/meetings" element={<ProtectedRoute><Meetings /></ProtectedRoute>} />
           <Route path="/calendar" element={<ProtectedRoute><Calendar /></ProtectedRoute>} />
           <Route path="/drive" element={<ProtectedRoute><Drive /></ProtectedRoute>} />
+          <Route path="/documents" element={<ProtectedRoute><Drive /></ProtectedRoute>} />
 
           {/* Intelligence */}
           <Route path="/ai" element={<ProtectedRoute><AIPlanner /></ProtectedRoute>} />
           <Route path="/ai-pm" element={<ProtectedRoute><AIProjectManager /></ProtectedRoute>} />
+          <Route path="/intelligence" element={<ProtectedRoute><AIProjectManager /></ProtectedRoute>} />
           <Route path="/github" element={<ProtectedRoute><GitHub /></ProtectedRoute>} />
           <Route path="/deploy" element={<ProtectedRoute><Deployment /></ProtectedRoute>} />
 

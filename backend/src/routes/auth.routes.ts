@@ -9,6 +9,7 @@ router.post('/register', authRateLimiter, register);
 router.post('/login', authRateLimiter, login);
 router.post('/logout', logout);
 router.post('/refresh-token', refreshToken);
+router.post('/refresh', refreshToken);
 
 // Protected routes
 router.get('/profile', authenticateJWT, getProfile);

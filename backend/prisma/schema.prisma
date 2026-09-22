@@ -85,22 +85,43 @@ model Project {
   lastGitSync     DateTime?
   vercelProjectId String?
   renderServiceId String?
-  teamId          String
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  activityLogs    ActivityLog[]
-  documents       Document[]
-  driveFiles      DriveFile[]
-  driveFolders    DriveFolder[]
-  gitAnalytics    GitAnalytics?
-  meetings        Meeting[]
-  messages        Message[]
-  milestones      Milestone[]
-  team            Team            @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  repositories    Repository[]
-  tasks           Task[]
-  gitCommits      GitCommit[]
-  activityEvents  ActivityEvent[]
+  teamId                 String
+  startDate              DateTime?
+  endDate                DateTime?
+  techStack              String[]        @default([])
+  startEventId           String?
+  endEventId             String?
+  architectureDiagramUrl String?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+  activityLogs           ActivityLog[]
+  calendarEvents         CalendarEvent[]
+  documents              Document[]
+  driveFiles             DriveFile[]
+  driveFolders           DriveFolder[]
+  gitAnalytics           GitAnalytics?
+  meetings               Meeting[]
+  messages               Message[]
+  milestones             Milestone[]
+  team                   Team            @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  repositories           Repository[]
+  tasks                  Task[]
+  gitCommits             GitCommit[]
+  activityEvents         ActivityEvent[]
+}
+
+model CalendarEvent {
+  id          String   @id @default(uuid())
+  projectId   String
+  title       String
+  date        DateTime
+  type        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, date])
 }
 
 model Repository {

@@ -1,7 +1,370 @@
 import { Request, Response } from 'express';
+import crypto from 'crypto';
 import prisma from '../utils/prisma';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { recalculateProjectHealth } from '../utils/projectHealth';
+
+export const getAvailableUsers = async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const users = await prisma.user.findMany({
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        avatarUrl: true,
+        role: true,
+        skills: true,
+        _count: {
+          select: {
+            assignedTasks: {
+              where: {
+                status: {
+                  not: 'COMPLETED',
+                },
+              },
+            },
+            teamMembers: true,
+          },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    const formatted = users.map((u) => {
+      let skillsArr: string[] = [];
+      if (typeof u.skills === 'string') {
+        try { skillsArr = JSON.parse(u.skills); } catch { skillsArr = []; }
+      } else if (Array.isArray(u.skills)) {
+        skillsArr = u.skills;
+      }
+
+      const openTasksCount = u._count?.assignedTasks ?? 0;
+      const teamsCount = u._count?.teamMembers ?? 0;
+      let availabilityStatus: 'AVAILABLE' | 'ASSIGNED' | 'BUSY' = 'AVAILABLE';
+      let availabilityLabel = 'Available';
+
+      if (openTasksCount > 3) {
+        availabilityStatus = 'BUSY';
+        availabilityLabel = `Busy (${openTasksCount} tasks)`;
+      } else if (openTasksCount > 0 || teamsCount > 1) {
+        availabilityStatus = 'ASSIGNED';
+        availabilityLabel = openTasksCount > 0 ? `Assigned (${openTasksCount} tasks)` : `Assigned (${teamsCount} teams)`;
+      }
+
+      return {
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        avatarUrl: u.avatarUrl,
+        role: u.role,
+        skills: skillsArr,
+        openTasksCount,
+        teamsCount,
+        availabilityStatus,
+        availabilityLabel,
+      };
+    });
+
+    res.json({ users: formatted });
+  } catch (error) {
+    console.error('[getAvailableUsers ERROR]', error);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+};
+
+export const createProjectWithTeam = async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const {
+      title,
+      description,
+      techStack,
+      githubRepo,
+      teamName,
+      existingTeamId,
+      memberIds = [],
+      objectives = [],
+      startDate,
+      endDate,
+      milestones = [],
+      tasks = [],
+    } = req.body;
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: 'Project title is required.' });
+    }
+    if (!existingTeamId && (!teamName || !teamName.trim())) {
+      return res.status(400).json({ error: 'Team name or existing team selection is required.' });
+    }
+
+    const creatorId = authReq.user.id;
+
+    // Ensure creator is included and prevent duplicates
+    const rawMemberIds = Array.isArray(memberIds) ? memberIds : [];
+    const uniqueMemberIds = Array.from(new Set([creatorId, ...rawMemberIds]));
+
+    // Atomic transaction for Team + Members + Project + Objectives + Calendar Events + Milestones + Tasks + Activity Log
+    const result = await prisma.$transaction(async (tx) => {
+      let teamIdToUse = existingTeamId;
+
+      if (teamIdToUse) {
+        // Verify existing team exists
+        const existingTeam = await tx.team.findUnique({
+          where: { id: teamIdToUse },
+          include: { members: true },
+        });
+        if (!existingTeam) {
+          throw new Error('Selected existing team not found.');
+        }
+
+        // Add any missing selected members to this existing team
+        const currentMemberUserIds = new Set(existingTeam.members.map((m: any) => m.userId));
+        for (const userId of uniqueMemberIds) {
+          if (!currentMemberUserIds.has(userId)) {
+            await tx.teamMember.create({
+              data: {
+                userId,
+                teamId: teamIdToUse,
+                role: userId === creatorId ? 'OWNER' : 'MEMBER',
+              },
+            });
+          }
+        }
+      } else {
+        // Generate unique 8-character invite code for new team
+        let inviteCode = '';
+        let isUnique = false;
+        while (!isUnique) {
+          inviteCode = crypto.randomBytes(4).toString('hex').toUpperCase();
+          const existing = await tx.team.findUnique({ where: { inviteCode } });
+          if (!existing) isUnique = true;
+        }
+
+        // 1. Create the new Team
+        const team = await tx.team.create({
+          data: {
+            name: teamName.trim(),
+            inviteCode,
+          },
+        });
+        teamIdToUse = team.id;
+
+        // 2. Add creator as OWNER and other selected members as MEMBER
+        for (const userId of uniqueMemberIds) {
+          await tx.teamMember.create({
+            data: {
+              userId,
+              teamId: team.id,
+              role: userId === creatorId ? 'OWNER' : 'MEMBER',
+            },
+          });
+        }
+      }
+
+      // 3. Create the Project
+      const parsedTechStack = Array.isArray(techStack) ? techStack : [];
+      const parsedObjectives = Array.isArray(objectives) ? objectives : [];
+      const parsedStartDate = startDate ? new Date(startDate) : null;
+      const parsedEndDate = endDate ? new Date(endDate) : null;
+
+      const project = await tx.project.create({
+        data: {
+          title: title.trim(),
+          description: description?.trim() || '',
+          objectives: JSON.stringify(parsedObjectives),
+          techStack: parsedTechStack,
+          githubRepo: githubRepo?.trim() || null,
+          startDate: parsedStartDate,
+          endDate: parsedEndDate,
+          teamId: teamIdToUse,
+          healthScore: 100,
+          status: 'HEALTHY',
+        },
+      });
+
+      // 4. Auto-create calendar events if dates provided
+      if (parsedStartDate) {
+        try {
+          const startEvent = await tx.calendarEvent.create({
+            data: {
+              projectId: project.id,
+              title: `${project.title} (Project Start)`,
+              date: parsedStartDate,
+              type: 'project_start',
+              description: `Project kicked off: ${project.title}`,
+            },
+          });
+          await tx.project.update({
+            where: { id: project.id },
+            data: { startEventId: startEvent.id },
+          });
+        } catch {
+          // Non-fatal if table not initialized
+        }
+      }
+
+      if (parsedEndDate) {
+        try {
+          const endEvent = await tx.calendarEvent.create({
+            data: {
+              projectId: project.id,
+              title: `${project.title} (Project Deadline)`,
+              date: parsedEndDate,
+              type: 'project_deadline',
+              description: `Project delivery deadline: ${project.title}`,
+            },
+          });
+          await tx.project.update({
+            where: { id: project.id },
+            data: { endEventId: endEvent.id },
+          });
+        } catch {
+          // Non-fatal
+        }
+      }
+
+      // 5. Create Milestones and nested Tasks if supplied
+      const milestoneMap = new Map<string, string>(); // title/key -> milestoneId
+      const createdMilestones = [];
+      const createdTasks = [];
+
+      if (Array.isArray(milestones) && milestones.length > 0) {
+        for (const ms of milestones) {
+          if (!ms.title || !ms.title.trim()) continue;
+          const msDueDate = ms.dueDate ? new Date(ms.dueDate) : parsedEndDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+          const milestone = await tx.milestone.create({
+            data: {
+              projectId: project.id,
+              title: ms.title.trim(),
+              description: ms.description?.trim() || '',
+              dueDate: msDueDate,
+              status: 'PENDING',
+            },
+          });
+          createdMilestones.push(milestone);
+          milestoneMap.set(ms.title.trim().toLowerCase(), milestone.id);
+
+          // If milestone has nested tasks
+          if (Array.isArray(ms.tasks) && ms.tasks.length > 0) {
+            for (const t of ms.tasks) {
+              if (!t.title || !t.title.trim()) continue;
+              const taskDueDate = t.dueDate ? new Date(t.dueDate) : msDueDate;
+              const taskPriority = ['HIGH', 'MEDIUM', 'LOW'].includes((t.priority || '').toUpperCase())
+                ? t.priority.toUpperCase()
+                : 'MEDIUM';
+              const assignedUserId = t.assigneeId && uniqueMemberIds.includes(t.assigneeId) ? t.assigneeId : null;
+
+              const task = await tx.task.create({
+                data: {
+                  title: t.title.trim(),
+                  description: t.description?.trim() || '',
+                  priority: taskPriority,
+                  status: 'TODO',
+                  projectId: project.id,
+                  milestoneId: milestone.id,
+                  assigneeId: assignedUserId,
+                  dueDate: taskDueDate,
+                },
+              });
+              createdTasks.push(task);
+            }
+          }
+        }
+      }
+
+      // 6. Create standalone tasks if passed separately
+      if (Array.isArray(tasks) && tasks.length > 0) {
+        for (const t of tasks) {
+          if (!t.title || !t.title.trim()) continue;
+          let milestoneId: string | null = null;
+          if (t.milestoneTitle) {
+            milestoneId = milestoneMap.get(t.milestoneTitle.trim().toLowerCase()) || null;
+          } else if (typeof t.milestoneIndex === 'number' && createdMilestones[t.milestoneIndex]) {
+            milestoneId = createdMilestones[t.milestoneIndex].id;
+          }
+
+          const taskDueDate = t.dueDate ? new Date(t.dueDate) : parsedEndDate;
+          const taskPriority = ['HIGH', 'MEDIUM', 'LOW'].includes((t.priority || '').toUpperCase())
+            ? t.priority.toUpperCase()
+            : 'MEDIUM';
+          const assignedUserId = t.assigneeId && uniqueMemberIds.includes(t.assigneeId) ? t.assigneeId : null;
+
+          const task = await tx.task.create({
+            data: {
+              title: t.title.trim(),
+              description: t.description?.trim() || '',
+              priority: taskPriority,
+              status: 'TODO',
+              projectId: project.id,
+              milestoneId,
+              assigneeId: assignedUserId,
+              dueDate: taskDueDate,
+            },
+          });
+          createdTasks.push(task);
+        }
+      }
+
+      // 7. Activity log
+      await tx.activityLog.create({
+        data: {
+          userId: creatorId,
+          projectId: project.id,
+          action: 'CREATED_PROJECT',
+          metadata: JSON.stringify({
+            title: project.title,
+            membersCount: uniqueMemberIds.length,
+            milestonesCount: createdMilestones.length,
+            tasksCount: createdTasks.length,
+          }),
+        },
+      });
+
+      // Fetch team with populated members
+      const teamWithMembers = await tx.team.findUnique({
+        where: { id: teamIdToUse },
+        include: {
+          members: {
+            include: {
+              user: {
+                select: { id: true, name: true, email: true, avatarUrl: true, skills: true },
+              },
+            },
+          },
+        },
+      });
+
+      // Fetch newly created project with relations
+      const fullProject = await tx.project.findUnique({
+        where: { id: project.id },
+        include: {
+          milestones: { include: { tasks: true } },
+          tasks: { include: { assignee: true } },
+        },
+      });
+
+      return { project: fullProject, team: teamWithMembers };
+    });
+
+    res.status(201).json({
+      message: 'Project and team created successfully',
+      project: result.project,
+      team: result.team
+    });
+  } catch (error: any) {
+    console.error('[createProjectWithTeam ERROR]', error);
+    res.status(500).json({ error: error.message || 'Internal Server Error' });
+  }
+};
 
 export const createProject = async (req: Request, res: Response) => {
   try {
@@ -53,6 +416,67 @@ export const createProject = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error(error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
+export const getMyProjects = async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const projects = await prisma.project.findMany({
+      where: {
+        team: {
+          members: {
+            some: {
+              userId: authReq.user.id
+            }
+          }
+        }
+      },
+      include: {
+        team: {
+          select: {
+            id: true,
+            name: true,
+            members: {
+              select: {
+                role: true,
+                user: {
+                  select: { id: true, name: true, email: true, avatarUrl: true }
+                }
+              }
+            }
+          }
+        },
+        tasks: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            priority: true,
+            dueDate: true,
+            assigneeId: true
+          }
+        },
+        milestones: {
+          select: {
+            id: true,
+            title: true,
+            dueDate: true,
+            status: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json({ projects });
+  } catch (error) {
+    console.error('[getMyProjects ERROR]', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 };

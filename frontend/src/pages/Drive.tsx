@@ -3,6 +3,8 @@ import { HardDrive, FolderOpen, FolderPlus, Upload, Download, Trash2, Search, Fi
 import api from '../utils/api';
 import { useAuthStore } from '../store/auth.store';
 import { toast } from 'sonner';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useProjectStore } from '../store/project.store';
 import FileUpload from '../components/FileUpload';
 import dayjs from 'dayjs';
 
@@ -34,6 +36,8 @@ const isIOS = (): boolean => {
 
 export default function Drive() {
   const { user } = useAuthStore();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { activeProjectId, switchProject } = useProjectStore();
   const [projects, setProjects] = useState<any[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>('');
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -41,45 +45,98 @@ export default function Drive() {
   const [files, setFiles] = useState<DriveFile[]>([]);
   const [breadcrumb, setBreadcrumb] = useState<Breadcrumb[]>([]);
   const [loading, setLoading] = useState(false);
+  const [projectsLoading, setProjectsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<DriveFile[] | null>(null);
   const [showUpload, setShowUpload] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolder, setShowNewFolder] = useState(false);
+  const [uploadTargetProjectId, setUploadTargetProjectId] = useState<string>('');
 
   useEffect(() => {
-    api.get('/teams/my-teams').then(res => {
-      const projs: any[] = [];
-      (res.data.teams || []).forEach((t: any) => (t.projects || []).forEach((p: any) => projs.push(p)));
+    setProjectsLoading(true);
+    api.get('/drive').then(res => {
+      const projs: any[] = res.data.projects || [];
       setProjects(projs);
-      if (projs.length > 0) setSelectedProject(projs[0].id);
-    }).catch(() => {});
-  }, []);
+      const urlProjectId = searchParams.get('project');
+
+      if (urlProjectId === '__ALL__') {
+        setSelectedProject('__ALL__');
+      } else if (urlProjectId && projs.some((p) => p.id === urlProjectId)) {
+        setSelectedProject(urlProjectId);
+      } else if (activeProjectId && activeProjectId !== '__ALL__' && projs.some((p) => p.id === activeProjectId)) {
+        setSelectedProject(activeProjectId);
+      } else {
+        // Automatically default to the project that contains uploaded files so data is immediately visible!
+        const projWithFiles = projs.find(p => (p.filesCount || 0) > 0);
+        if (projWithFiles) {
+          setSelectedProject(projWithFiles.id);
+          switchProject(projWithFiles.id);
+        } else if (projs.length > 0) {
+          setSelectedProject(projs[0].id);
+        }
+      }
+    }).catch(() => {
+      api.get('/teams/my-teams').then(res => {
+        const projs: any[] = [];
+        (res.data.teams || []).forEach((t: any) => (t.projects || []).forEach((p: any) => projs.push(p)));
+        setProjects(projs);
+        if (projs.length > 0) setSelectedProject(projs[0].id);
+      });
+    }).finally(() => setProjectsLoading(false));
+  }, [activeProjectId]);
+
+  const handleProjectSelect = (projectId: string) => {
+    setSelectedProject(projectId);
+    if (projectId !== '__ALL__') {
+      switchProject(projectId);
+      setSearchParams({ project: projectId });
+    } else {
+      setSearchParams({ project: '__ALL__' });
+    }
+  };
 
   const loadDrive = async (projectId: string, folderId: string | null = null) => {
     if (!projectId) return;
     setLoading(true);
     setSearchResults(null);
     try {
-      const params = folderId ? `?folderId=${folderId}` : '';
-      const res = await api.get(`/drive/${projectId}${params}`);
-      setFolders(res.data.folders);
-      setFiles(res.data.files);
-      setBreadcrumb(res.data.breadcrumb || []);
-      setCurrentFolderId(folderId);
+      if (projectId === '__ALL__') {
+        const res = await api.get('/drive/files');
+        setFolders([]);
+        setFiles(res.data.files || []);
+        setBreadcrumb([]);
+        setCurrentFolderId(null);
+      } else {
+        const params = folderId ? `?folderId=${folderId}` : '';
+        const res = await api.get(`/drive/${projectId}${params}`);
+        setFolders(res.data.folders || []);
+        setFiles(res.data.files || []);
+        setBreadcrumb(res.data.breadcrumb || []);
+        setCurrentFolderId(folderId);
+      }
     } catch { } finally { setLoading(false); }
   };
 
   useEffect(() => { if (selectedProject) loadDrive(selectedProject, null); }, [selectedProject]);
 
   const handleSearch = async () => {
-    if (!searchQuery.trim() || !selectedProject) return;
-    const res = await api.get(`/drive/${selectedProject}/search?q=${encodeURIComponent(searchQuery)}`);
-    setSearchResults(res.data.files);
+    if (!searchQuery.trim()) return;
+    if (selectedProject === '__ALL__') {
+      const q = searchQuery.toLowerCase();
+      const filtered = files.filter(f =>
+        f.name.toLowerCase().includes(q) ||
+        ((f as any).project?.title || '').toLowerCase().includes(q)
+      );
+      setSearchResults(filtered);
+    } else {
+      const res = await api.get(`/drive/${selectedProject}/search?q=${encodeURIComponent(searchQuery)}`);
+      setSearchResults(res.data.files || []);
+    }
   };
 
   const createFolder = async () => {
-    if (!newFolderName.trim() || !selectedProject) return;
+    if (!newFolderName.trim() || !selectedProject || selectedProject === '__ALL__') return;
     try {
       const res = await api.post(`/drive/${selectedProject}/folders`, { name: newFolderName, parentId: currentFolderId });
       if (res.data?.folder) {
@@ -244,6 +301,28 @@ export default function Drive() {
 
   const displayFiles = searchResults !== null ? searchResults : files;
 
+  if (!projectsLoading && projects.length === 0) {
+    return (
+      <div className="max-w-xl mx-auto py-16 text-center space-y-5">
+        <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto text-primary">
+          <HardDrive className="w-8 h-8" />
+        </div>
+        <div>
+          <h2 className="text-2xl font-bold text-foreground">Documentation Workspace</h2>
+          <p className="text-sm text-muted-foreground mt-2">
+            You don't have any projects in your workspace yet. Create or join a project to upload specifications, architecture diagrams, and team documents.
+          </p>
+        </div>
+        <Link
+          to="/projects"
+          className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground font-bold text-sm rounded-xl hover:bg-primary/90 transition-all shadow-md"
+        >
+          <FolderOpen className="w-4 h-4" /> Go to Projects
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       <div className="flex items-start justify-between flex-wrap gap-4">
@@ -253,13 +332,26 @@ export default function Drive() {
           <p className="text-muted-foreground text-sm mt-1">Upload, organise & share project files — like Google Drive</p>
         </div>
         <div className="flex items-center gap-2">
-          <select value={selectedProject} onChange={e => setSelectedProject(e.target.value)} className="glass-input text-sm rounded-xl outline-none text-foreground">
-            {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+          <select
+            value={selectedProject}
+            onChange={e => handleProjectSelect(e.target.value)}
+            className="glass-input text-sm rounded-xl outline-none text-foreground font-semibold py-2 px-3 cursor-pointer min-w-[220px]"
+          >
+            <option value="__ALL__" className="bg-slate-900 text-primary font-bold">
+              ⚡ All Workspace Files ({projects.reduce((acc, p) => acc + (p.filesCount || 0), 0)})
+            </option>
+            {projects.map(p => (
+              <option key={p.id} value={p.id} className="bg-slate-900 text-slate-100">
+                📁 {p.title} ({p.filesCount ?? 0} files{p.foldersCount ? `, ${p.foldersCount} folders` : ''})
+              </option>
+            ))}
           </select>
-          <button onClick={() => setShowNewFolder(true)} className="flex items-center gap-1.5 px-3 py-2 glass-card text-sm font-semibold text-foreground rounded-xl hover:bg-secondary transition-colors">
-            <FolderPlus className="w-4 h-4" /> New Folder
-          </button>
-          <button onClick={() => setShowUpload(!showUpload)} className="flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground text-sm font-bold rounded-xl hover:bg-primary/90 transition-colors">
+          {selectedProject !== '__ALL__' && (
+            <button onClick={() => setShowNewFolder(true)} className="flex items-center gap-1.5 px-3 py-2 glass-card text-sm font-semibold text-foreground rounded-xl hover:bg-secondary transition-colors">
+              <FolderPlus className="w-4 h-4" /> New Folder
+            </button>
+          )}
+          <button onClick={() => setShowUpload(!showUpload)} className="flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground text-sm font-bold rounded-xl hover:bg-primary/90 transition-colors shadow-md">
             <Upload className="w-4 h-4" /> Upload
           </button>
         </div>
@@ -278,14 +370,33 @@ export default function Drive() {
         )}
       </div>
 
-      {showUpload && user && selectedProject && (
-        <div className="glass-panel rounded-2xl p-5">
-          <h3 className="text-sm font-bold text-foreground mb-3">Upload Files to {currentFolderId ? 'Folder' : 'Root'}</h3>
+      {showUpload && user && (
+        <div className="glass-panel rounded-2xl p-5 border border-primary/30">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+              <Upload className="w-4 h-4 text-primary" />
+              Upload Files {selectedProject !== '__ALL__' ? `to ${currentFolderId ? 'Folder' : 'Root'}` : 'to Workspace'}
+            </h3>
+            {selectedProject === '__ALL__' && projects.length > 0 && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground font-semibold">Target Project:</span>
+                <select
+                  value={uploadTargetProjectId || projects[0]?.id}
+                  onChange={e => setUploadTargetProjectId(e.target.value)}
+                  className="glass-input text-xs rounded-lg py-1 px-2.5 font-medium"
+                >
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id} className="bg-slate-900">{p.title}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
           <FileUpload
-            projectId={selectedProject}
+            projectId={selectedProject === '__ALL__' ? (uploadTargetProjectId || projects[0]?.id) : selectedProject}
             uploadedById={user.id}
             driveMode={true}
-            folderId={currentFolderId || undefined}
+            folderId={selectedProject !== '__ALL__' ? (currentFolderId || undefined) : undefined}
             onUploaded={(doc) => {
               if (doc) {
                 setFiles(prev => [doc, ...prev]);
@@ -299,7 +410,7 @@ export default function Drive() {
         </div>
       )}
 
-      {showNewFolder && (
+      {showNewFolder && selectedProject !== '__ALL__' && (
         <div className="glass-panel rounded-2xl p-4 flex items-center gap-3">
           <FolderOpen className="w-5 h-5 text-amber-500" />
           <input autoFocus value={newFolderName} onChange={e => setNewFolderName(e.target.value)}
@@ -311,15 +422,23 @@ export default function Drive() {
       )}
 
       <div className="flex items-center gap-1 text-sm">
-        <button onClick={() => loadDrive(selectedProject, null)} className="text-primary hover:underline font-semibold flex items-center gap-1">
-          <HardDrive className="w-3.5 h-3.5" /> Root
-        </button>
-        {breadcrumb.map(bc => (
-          <span key={bc.id} className="flex items-center gap-1">
-            <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
-            <button onClick={() => loadDrive(selectedProject, bc.id)} className="text-primary hover:underline">{bc.name}</button>
+        {selectedProject === '__ALL__' ? (
+          <span className="text-foreground font-bold flex items-center gap-1.5">
+            <HardDrive className="w-4 h-4 text-primary" /> All Workspace Documents ({displayFiles.length} files)
           </span>
-        ))}
+        ) : (
+          <>
+            <button onClick={() => loadDrive(selectedProject, null)} className="text-primary hover:underline font-semibold flex items-center gap-1">
+              <HardDrive className="w-3.5 h-3.5" /> Root
+            </button>
+            {breadcrumb.map(bc => (
+              <span key={bc.id} className="flex items-center gap-1">
+                <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+                <button onClick={() => loadDrive(selectedProject, bc.id)} className="text-primary hover:underline">{bc.name}</button>
+              </span>
+            ))}
+          </>
+        )}
       </div>
 
       {loading ? (
@@ -358,11 +477,18 @@ export default function Drive() {
                   <div key={f.id} className="flex items-center gap-4 p-3 glass-card rounded-xl hover:border-primary/30 transition-all group">
                     <div className="flex-shrink-0 cursor-pointer" onClick={() => openPreview(f)}>{fileIcon(f.fileType)}</div>
                     <div className="flex-1 min-w-0">
-                      <button onClick={() => openPreview(f)} className="text-sm font-bold text-foreground truncate hover:text-primary transition-colors text-left block w-full">
-                        {f.name}
-                      </button>
-                      <p className="text-xs text-muted-foreground">
-                        {formatSize(f.fileSize)} · {f.uploadedBy?.name} · {dayjs(f.createdAt).format('MMM D, YYYY')}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button onClick={() => openPreview(f)} className="text-sm font-bold text-foreground truncate hover:text-primary transition-colors text-left">
+                          {f.name}
+                        </button>
+                        {(f as any).project?.title && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20">
+                            {(f as any).project.title}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {formatSize(f.fileSize)} · {f.uploadedBy?.name || 'User'} · {dayjs(f.createdAt).format('MMM D, YYYY')}
                         {f.folder && <span> · in {f.folder.name}</span>}
                       </p>
                     </div>
@@ -373,7 +499,7 @@ export default function Drive() {
                       <button onClick={() => downloadFile(f)} title="Download" className="p-1.5 hover:bg-secondary rounded-lg transition-colors">
                         <Download className="w-4 h-4 text-primary" />
                       </button>
-                      <button onClick={() => { setMovingFile(f); loadAllFolders(selectedProject); }} title="Move to Folder" className="p-1.5 hover:bg-amber-500/10 rounded-lg transition-colors">
+                      <button onClick={() => { setMovingFile(f); loadAllFolders((f as any).projectId || selectedProject); }} title="Move to Folder" className="p-1.5 hover:bg-amber-500/10 rounded-lg transition-colors">
                         <FolderInput className="w-4 h-4 text-amber-500" />
                       </button>
                       <button onClick={() => deleteFile(f.id)} title="Delete" className="p-1.5 hover:bg-destructive/10 rounded-lg transition-colors">

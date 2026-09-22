@@ -5,7 +5,8 @@ import {
   markNotificationsRead,
   getProjectActivityFeed,
   createMeeting,
-  getActiveSessions
+  getActiveSessions,
+  getUpcomingDeadlines
 } from '../controllers/misc.controller';
 import { authenticateJWT } from '../middlewares/auth.middleware';
 
@@ -18,6 +19,9 @@ router.get('/notifications', getNotifications);
 router.patch('/notifications/mark-read', markNotificationsRead);
 router.put('/notifications/mark-all-read', markNotificationsRead);
 router.put('/notifications/:id/read', markNotificationRead);
+
+// Deadlines
+router.get('/deadlines', getUpcomingDeadlines);
 
 // Active Sessions
 router.get('/sessions', getActiveSessions);

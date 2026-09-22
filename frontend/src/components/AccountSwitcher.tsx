@@ -9,6 +9,8 @@ import api from '../utils/api';
 
 interface AccountSwitcherProps {
   onAddAccount?: () => void;
+  placement?: 'top' | 'bottom';
+  compact?: boolean;
 }
 
 const avatarColors: Record<string, string> = {
@@ -37,7 +39,7 @@ function AccountAvatar({ account, size = 'md' }: { account: { name: string; avat
   );
 }
 
-export default function AccountSwitcher({ onAddAccount }: AccountSwitcherProps) {
+export default function AccountSwitcher({ onAddAccount, placement = 'top', compact = false }: AccountSwitcherProps) {
   const navigate = useNavigate();
   const { user, accounts, switchAccount, removeAccount, logoutAll } = useAuthStore();
   const [open, setOpen] = useState(false);
@@ -98,19 +100,27 @@ export default function AccountSwitcher({ onAddAccount }: AccountSwitcherProps) 
       {/* Trigger Button */}
       <button
         onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl hover:bg-secondary border border-transparent hover:border-border transition-all group"
+        className={compact
+          ? "h-9 w-9 rounded-xl flex items-center justify-center hover:bg-slate-900 border border-slate-800/80 hover:border-slate-700 transition-all group"
+          : "flex items-center gap-2.5 px-2 py-1.5 rounded-xl hover:bg-secondary border border-transparent hover:border-border transition-all group"
+        }
+        title={compact ? `${user.name} (${user.role})` : undefined}
       >
         <AccountAvatar account={user} size="sm" />
-        <div className="flex-1 overflow-hidden text-left hidden lg:block">
-          <p className="text-xs font-semibold text-foreground truncate leading-tight">{user.name}</p>
-          <p className="text-[10px] text-muted-foreground truncate leading-tight capitalize">{user.role.toLowerCase()}</p>
-        </div>
-        <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+        {!compact && (
+          <>
+            <div className="flex-1 overflow-hidden text-left hidden lg:block">
+              <p className="text-xs font-semibold text-foreground truncate leading-tight">{user.name}</p>
+              <p className="text-[10px] text-muted-foreground truncate leading-tight capitalize">{user.role.toLowerCase()}</p>
+            </div>
+            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+          </>
+        )}
       </button>
 
       {/* Dropdown Panel */}
       {open && (
-        <div className="absolute bottom-full left-0 mb-2 w-72 glass-panel border border-border rounded-2xl shadow-2xl overflow-hidden z-[100]">
+        <div className={`absolute ${placement === 'bottom' ? 'top-full right-0 mt-2' : 'bottom-full left-0 mb-2'} w-72 glass-panel border border-border rounded-2xl shadow-2xl overflow-hidden z-[100]`}>
           {/* Current Account Header */}
           <div className="p-4 border-b border-border bg-primary/5">
             <div className="flex items-center gap-3">

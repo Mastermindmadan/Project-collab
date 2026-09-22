@@ -1,12 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import type { DropResult } from '@hello-pangea/dnd';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams, useLocation } from 'react-router-dom';
 import api from '../utils/api';
 import { useAuthStore } from '../store/auth.store';
+import { useProjectStore } from '../store/project.store';
 import {
   CheckSquare, Plus, Search, Filter, Clock, User,
-  MoreVertical, Loader2, X, MessageSquare, Send, Trash2, ShieldAlert, CheckCircle, AlertCircle
+  MoreVertical, Loader2, X, MessageSquare, Send, Trash2, ShieldAlert, CheckCircle, AlertCircle, Target,
+  ArrowRight, FolderOpen
 } from 'lucide-react';
 
 type Priority = 'LOW' | 'MEDIUM' | 'HIGH';
@@ -81,21 +83,53 @@ const columnTitles: Record<Status, string> = {
 const avatarColors = ['bg-blue-600', 'bg-purple-600', 'bg-emerald-600', 'bg-amber-600', 'bg-red-600'];
 const getAvatarColor = (text: string) => avatarColors[text.charCodeAt(0) % avatarColors.length];
 
-export default function TaskBoard() {
+interface TaskBoardProps {
+  defaultView?: 'PROJECT_KANBAN' | 'MY_TASKS';
+}
 
+export default function TaskBoard({ defaultView }: TaskBoardProps = {}) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
 
   // Database / Project scoping
   const [projects, setProjects] = useState<any[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(() => searchParams.get('project') || '');
   const [selectedProjectDetails, setSelectedProjectDetails] = useState<any | null>(null);
 
-  // Kanban columns state
+  // Kanban columns state (All 4 columns)
   const [columns, setColumns] = useState<Column[]>([
     { id: 'TODO', title: 'To Do', color: columnBorders.TODO, tasks: [] },
     { id: 'IN_PROGRESS', title: 'In Progress', color: columnBorders.IN_PROGRESS, tasks: [] },
     { id: 'REVIEW', title: 'In Review', color: columnBorders.REVIEW, tasks: [] },
     { id: 'COMPLETED', title: 'Done', color: columnBorders.COMPLETED, tasks: [] },
   ]);
+
+  // Dual View Mode: Global assigned tasks vs Project Kanban board
+  const isMyTasksRoute = location.pathname === '/my-tasks' || defaultView === 'MY_TASKS' || searchParams.get('view') === 'my-tasks';
+  const [viewMode, setViewMode] = useState<'PROJECT_KANBAN' | 'MY_TASKS'>(() => isMyTasksRoute ? 'MY_TASKS' : 'PROJECT_KANBAN');
+  const [myTasks, setMyTasks] = useState<any[]>([]);
+  const [myTasksLoading, setMyTasksLoading] = useState(false);
+  const [myTasksStatusFilter, setMyTasksStatusFilter] = useState<string>('ALL');
+  const { activeProjectId, switchProject } = useProjectStore();
+
+  useEffect(() => {
+    if (location.pathname === '/my-tasks' || defaultView === 'MY_TASKS' || searchParams.get('view') === 'my-tasks') {
+      setViewMode('MY_TASKS');
+    } else if (location.pathname === '/tasks') {
+      setViewMode('PROJECT_KANBAN');
+    }
+  }, [location.pathname, defaultView, searchParams]);
+
+  // Milestone lookup map
+  const milestoneMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (selectedProjectDetails?.milestones) {
+      selectedProjectDetails.milestones.forEach((m: any) => {
+        map.set(m.id, m.title);
+      });
+    }
+    return map;
+  }, [selectedProjectDetails]);
 
   // Loading and alerts
   const [loading, setLoading] = useState(true);
@@ -127,6 +161,36 @@ export default function TaskBoard() {
   const [createMilestoneId, setCreateMilestoneId] = useState('');
   const [createDueDate, setCreateDueDate] = useState('');
 
+  // Load user's assigned tasks across all projects
+  const loadMyTasks = async () => {
+    try {
+      setMyTasksLoading(true);
+      const res = await api.get('/tasks/my-tasks');
+      setMyTasks(res.data.tasks || []);
+    } catch (err) {
+      console.error('Failed to load my tasks', err);
+    } finally {
+      setMyTasksLoading(false);
+    }
+  };
+
+  const handleMyTaskStatusChange = async (taskId: string, newStatus: Status) => {
+    try {
+      setActionLoading(true);
+      await api.put(`/tasks/${taskId}`, { status: newStatus });
+      setMyTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+      showToast(`Task status updated to ${newStatus}`);
+      if (selectedProjectId) {
+        await loadProjectTasks(selectedProjectId);
+      }
+    } catch (err) {
+      console.error('Failed to update task status', err);
+      showToast('Failed to update task status', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   // Load user's projects first
   const loadProjects = async () => {
     try {
@@ -144,8 +208,20 @@ export default function TaskBoard() {
       });
 
       setProjects(allProjects);
-      if (allProjects.length > 0) {
-        setSelectedProjectId(allProjects[0].id);
+      const urlProjectId = searchParams.get('project');
+      const storeProjectId = activeProjectId;
+      const targetId = (urlProjectId && allProjects.some((p) => p.id === urlProjectId))
+        ? urlProjectId
+        : (storeProjectId && allProjects.some((p) => p.id === storeProjectId))
+        ? storeProjectId
+        : allProjects[0]?.id;
+
+      if (targetId) {
+        setSelectedProjectId(targetId);
+        switchProject(targetId);
+        if (urlProjectId !== targetId) {
+          setSearchParams({ project: targetId }, { replace: true });
+        }
       } else {
         setLoading(false);
       }
@@ -187,6 +263,7 @@ export default function TaskBoard() {
 
   useEffect(() => {
     loadProjects();
+    loadMyTasks();
   }, []);
 
   useEffect(() => {
@@ -353,6 +430,51 @@ export default function TaskBoard() {
     }
   };
 
+  const handleDeleteSubtask = async (subtaskId: string) => {
+    if (!activeTask) return;
+    try {
+      setActionLoading(true);
+      await api.delete(`/tasks/subtask/${subtaskId}`);
+      const updatedSubtasks = activeTask.oldSubtasks.filter(s => s.id !== subtaskId);
+      const updatedTask = { ...activeTask, oldSubtasks: updatedSubtasks };
+      setActiveTask(updatedTask);
+      showToast('Subtask deleted');
+      await loadProjectTasks(selectedProjectId);
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to delete subtask item.', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleUpdateActiveTaskField = async (field: keyof Task | 'assigneeId', value: any) => {
+    if (!activeTask) return;
+    const previousTask = { ...activeTask };
+    let updatedTask = { ...activeTask, [field]: value };
+    if (field === 'assigneeId') {
+      const assignedMember = projectMembers.find((m: any) => m.user.id === value);
+      updatedTask = {
+        ...updatedTask,
+        assigneeId: value || null,
+        assignee: assignedMember ? { id: assignedMember.user.id, name: assignedMember.user.name, email: assignedMember.user.email } : null
+      };
+    }
+    setActiveTask(updatedTask);
+
+    try {
+      await api.put(`/tasks/${activeTask.id}`, { [field]: value });
+      showToast('Task updated');
+      if (selectedProjectId) {
+        await loadProjectTasks(selectedProjectId);
+      }
+    } catch (err) {
+      console.error(err);
+      setActiveTask(previousTask);
+      showToast('Failed to update task', 'error');
+    }
+  };
+
   // Comments management
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -406,6 +528,18 @@ export default function TaskBoard() {
   const canUserChangeStatus = (task: Task) =>
     task.assigneeId === currentUserId || currentUserRole === 'ADMIN' || currentUserRole === 'OWNER';
 
+  const filteredMyTasks = useMemo(() => {
+    return myTasks.filter((t: any) => {
+      const matchesSearch =
+        (t.title || '').toLowerCase().includes(search.toLowerCase()) ||
+        (t.description || '').toLowerCase().includes(search.toLowerCase()) ||
+        (t.project?.title || '').toLowerCase().includes(search.toLowerCase());
+      const matchesPriority = priorityFilter === 'ALL' || t.priority === priorityFilter;
+      const matchesStatus = myTasksStatusFilter === 'ALL' || t.status === myTasksStatusFilter;
+      return matchesSearch && matchesPriority && matchesStatus;
+    });
+  }, [myTasks, search, priorityFilter, myTasksStatusFilter]);
+
   return (
     <div className="space-y-8">
       {/* Global Toast Notification */}
@@ -441,7 +575,10 @@ export default function TaskBoard() {
           {projects.length > 0 && (
             <select
               value={selectedProjectId}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
+              onChange={(e) => {
+                setSelectedProjectId(e.target.value);
+                setSearchParams({ project: e.target.value });
+              }}
               className="px-3.5 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl focus:border-primary/50 outline-none text-xs text-white transition-all cursor-pointer font-semibold min-w-[140px]"
             >
               {projects.map((p) => (
@@ -481,7 +618,7 @@ export default function TaskBoard() {
           <ShieldAlert className="w-16 h-16 text-slate-700 mx-auto mb-4 animate-pulse" />
           <h3 className="text-lg font-bold text-white mb-1 font-sans">No Project Workspaces Found</h3>
           <p className="text-slate-400 text-sm max-w-md mx-auto mb-6">
-            You must register a project module workspace inside a team before allocating tasks on the board.
+            You haven't created any projects yet. Create a project first, then assign tasks here.
           </p>
           <Link
             to="/projects"
@@ -492,8 +629,190 @@ export default function TaskBoard() {
         </div>
       ) : (
         <>
-          {/* Toolbar */}
-          <div className="flex flex-wrap items-center gap-3">
+          {/* Dual Context Toggle Bar */}
+          <div className="flex items-center p-1 rounded-2xl bg-secondary/50 border border-border w-fit shadow-sm mb-2">
+            <button
+              onClick={() => setViewMode('PROJECT_KANBAN')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'PROJECT_KANBAN'
+                  ? 'bg-primary text-primary-foreground shadow-md'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <CheckSquare className="w-3.5 h-3.5" /> Project Board {selectedProjectDetails ? `(${selectedProjectDetails.title})` : ''}
+            </button>
+            <button
+              onClick={() => {
+                setViewMode('MY_TASKS');
+                loadMyTasks();
+              }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'MY_TASKS'
+                  ? 'bg-primary text-primary-foreground shadow-md'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <User className="w-3.5 h-3.5" /> All My Assigned Tasks ({myTasks.length})
+            </button>
+          </div>
+
+          {viewMode === 'MY_TASKS' ? (
+            /* Global My Assigned Tasks View */
+            <div className="space-y-4">
+              {/* Filters for My Tasks */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative flex-1 min-w-[200px]">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Search assigned tasks by title, description or project..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2.5 bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:border-primary/50 outline-none transition-all"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-slate-500 mr-1.5 flex items-center gap-1.5">
+                    <Filter className="w-3.5 h-3.5" /> Status:
+                  </span>
+                  {['ALL', 'TODO', 'IN_PROGRESS', 'REVIEW', 'COMPLETED'].map((st) => (
+                    <button
+                      key={st}
+                      onClick={() => setMyTasksStatusFilter(st)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                        myTasksStatusFilter === st
+                          ? 'bg-slate-800 border-slate-700 text-white'
+                          : 'bg-slate-900/30 border-slate-900 text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      {st === 'ALL' ? 'All' : st === 'IN_PROGRESS' ? 'In Progress' : st.charAt(0) + st.slice(1).toLowerCase()}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-slate-500 mr-1.5">Priority:</span>
+                  {['ALL', 'LOW', 'MEDIUM', 'HIGH'].map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setPriorityFilter(p)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                        priorityFilter === p
+                          ? 'bg-slate-800 border-slate-700 text-white'
+                          : 'bg-slate-900/30 border-slate-900 text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      {p === 'ALL' ? 'All' : p.charAt(0) + p.slice(1).toLowerCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tasks List */}
+              {myTasksLoading ? (
+                <div className="glass-panel rounded-2xl p-12 text-center flex flex-col items-center justify-center gap-3">
+                  <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                  <p className="text-xs text-slate-400">Loading your assigned tasks...</p>
+                </div>
+              ) : filteredMyTasks.length === 0 ? (
+                <div className="glass-panel rounded-2xl p-12 text-center">
+                  <CheckSquare className="w-12 h-12 text-emerald-500/40 mx-auto mb-3" />
+                  <h3 className="text-base font-bold text-white mb-1">No Assigned Tasks Match</h3>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    No tasks assigned to your account match the current filters. Switch back to the Project Board to create and claim tasks.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3">
+                  {filteredMyTasks.map((t: any) => {
+                    const isOverdue = t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'COMPLETED';
+                    const prio = priorityConfig[t.priority as Priority] || priorityConfig.LOW;
+
+                    return (
+                      <div
+                        key={t.id}
+                        className="glass-card rounded-2xl p-4 border border-border hover:border-primary/40 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 group"
+                      >
+                        <div
+                          className="flex items-start gap-3.5 flex-1 min-w-0 cursor-pointer"
+                          onClick={() => setActiveTask(t)}
+                        >
+                          <div className={`w-3 h-3 rounded-full mt-1 flex-shrink-0 ${prio.dot}`} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="text-sm font-bold text-foreground group-hover:text-primary transition-colors">
+                                {t.title}
+                              </h4>
+                              <span
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (t.projectId) {
+                                    switchProject(t.projectId);
+                                    setSelectedProjectId(t.projectId);
+                                    setSearchParams({ project: t.projectId });
+                                    setViewMode('PROJECT_KANBAN');
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-secondary text-primary hover:bg-primary/20 text-[10px] font-bold cursor-pointer transition-colors"
+                              >
+                                <FolderOpen className="w-3 h-3" /> {t.project?.title || 'Project'} →
+                              </span>
+                              {t.milestone && (
+                                <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                  <Target className="w-3 h-3 text-secondary-foreground" /> {t.milestone.title}
+                                </span>
+                              )}
+                            </div>
+                            {t.description && (
+                              <p className="text-xs text-muted-foreground line-clamp-1 mt-1">{t.description}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3 flex-shrink-0 justify-between sm:justify-end border-t sm:border-t-0 pt-2 sm:pt-0 border-border/50">
+                          {t.dueDate && (
+                            <span className={`text-xs font-semibold flex items-center gap-1 ${isOverdue ? 'text-red-400 font-bold' : 'text-muted-foreground'}`}>
+                              <Clock className="w-3.5 h-3.5" />
+                              {new Date(t.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                            </span>
+                          )}
+
+                          <select
+                            value={t.status}
+                            onChange={(e) => handleMyTaskStatusChange(t.id, e.target.value as Status)}
+                            className={`text-xs font-bold px-3 py-1.5 rounded-xl border focus:outline-none cursor-pointer ${
+                              t.status === 'COMPLETED' ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400' :
+                              t.status === 'IN_PROGRESS' ? 'bg-blue-500/15 border-blue-500/30 text-blue-400' :
+                              t.status === 'REVIEW' ? 'bg-purple-500/15 border-purple-500/30 text-purple-400' :
+                              'bg-slate-800 border-slate-700 text-slate-300'
+                            }`}
+                          >
+                            <option value="TODO" className="bg-slate-900 text-slate-200">To Do</option>
+                            <option value="IN_PROGRESS" className="bg-slate-900 text-blue-300">In Progress</option>
+                            <option value="REVIEW" className="bg-slate-900 text-purple-300">In Review</option>
+                            <option value="COMPLETED" className="bg-slate-900 text-emerald-300">Done</option>
+                          </select>
+
+                          <button
+                            onClick={() => setActiveTask(t)}
+                            className="p-1.5 rounded-xl hover:bg-secondary text-muted-foreground hover:text-foreground cursor-pointer"
+                            title="View Details"
+                          >
+                            <ArrowRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Kanban Board Mode */
+            <>
+              {/* Toolbar */}
+              <div className="flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
               <input
@@ -533,7 +852,7 @@ export default function TaskBoard() {
           <DragDropContext onDragEnd={onDragEnd}>
             <div className="flex gap-5 overflow-x-auto pb-6" style={{ minHeight: '520px', scrollbarWidth: 'thin' }}>
               {filteredColumns.map((column) => (
-                <div key={column.id} className="flex flex-col flex-shrink-0 w-[82vw] sm:w-72 max-w-[340px]">
+                <div key={column.id} className="flex flex-col flex-shrink-0 w-[82vw] sm:w-64 md:w-68 lg:w-72 xl:w-auto xl:flex-1 min-w-[240px] max-w-[360px]">
                   {/* Column Header */}
                   <div className={`flex items-center justify-between mb-4 pb-3 border-b-2 ${column.color}`}>
                     <div className="flex items-center gap-2">
@@ -563,11 +882,13 @@ export default function TaskBoard() {
                           snapshot.isDraggingOver ? 'bg-primary/5 border border-dashed border-primary/25' : ''
                         }`}
                       >
-                                                {column.tasks.map((task, index) => {
+                        {column.tasks.map((task, index) => {
                           const priority = priorityConfig[task.priority] || priorityConfig.LOW;
                           const doneSub = task.oldSubtasks.filter(s => s.isCompleted).length;
                           const totalSub = task.oldSubtasks.length;
                           const canChangeStatus = canUserChangeStatus(task);
+                          const milestoneTitle = task.milestoneId ? milestoneMap.get(task.milestoneId) : null;
+                          const isOverdue = task.dueDate && new Date(task.dueDate) < new Date() && task.status !== 'COMPLETED';
 
                           return (
                             <Draggable key={task.id} draggableId={task.id} index={index} isDragDisabled={!canChangeStatus}>
@@ -584,7 +905,7 @@ export default function TaskBoard() {
                                     dragSnap.isDragging ? 'shadow-2xl shadow-primary/20 scale-[1.02] rotate-1 border-primary/45 bg-slate-900' : ''
                                   }`}
                                 >
-                                  {/* Priority indicator */}
+                                  {/* Priority indicator & badges */}
                                   <div className="flex items-center justify-between mb-3">
                                     <div className="flex items-center gap-1.5">
                                       <div className={`w-1.5 h-1.5 rounded-full ${priority.dot}`} />
@@ -592,10 +913,15 @@ export default function TaskBoard() {
                                         {priority.label}
                                       </span>
                                     </div>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-1.5">
+                                      {isOverdue && (
+                                        <span className="flex items-center gap-1 px-1.5 py-0.5 bg-rose-500/15 border border-rose-500/30 text-rose-400 text-[10px] font-bold rounded">
+                                          <AlertCircle className="w-2.5 h-2.5" /> Overdue
+                                        </span>
+                                      )}
                                       {task.githubVerified && (
-                                        <span className="flex items-center gap-1 px-2 py-0.5 bg-purple-500/10 border border-purple-500/30 text-purple-400 text-[10px] font-bold rounded-md">
-                                          <CheckCircle className="w-3 h-3" /> GitHub Verified
+                                        <span className="flex items-center gap-1 px-1.5 py-0.5 bg-purple-500/10 border border-purple-500/30 text-purple-400 text-[10px] font-bold rounded">
+                                          <CheckCircle className="w-2.5 h-2.5" /> GitHub
                                         </span>
                                       )}
                                       <button className="p-1 rounded text-slate-655 hover:text-white">
@@ -603,6 +929,16 @@ export default function TaskBoard() {
                                       </button>
                                     </div>
                                   </div>
+
+                                  {/* Milestone badge */}
+                                  {milestoneTitle && (
+                                    <div className="mb-2">
+                                      <span className="inline-flex items-center gap-1 text-[10px] text-primary/90 font-medium px-2 py-0.5 rounded bg-primary/10 border border-primary/20 truncate max-w-full">
+                                        <Target className="w-2.5 h-2.5 flex-shrink-0" />
+                                        <span className="truncate">{milestoneTitle}</span>
+                                      </span>
+                                    </div>
+                                  )}
 
                                   {/* Title */}
                                   <p className="text-xs font-bold text-white mb-2 leading-relaxed truncate">{task.title}</p>
@@ -645,7 +981,7 @@ export default function TaskBoard() {
 
                                     <div className="flex items-center gap-2.5 text-[10px] text-slate-550">
                                       {task.dueDate && (
-                                        <span className="flex items-center gap-1">
+                                        <span className={`flex items-center gap-1 ${isOverdue ? 'text-rose-400 font-semibold' : ''}`}>
                                           <Clock className="w-2.5 h-2.5" />
                                           {new Date(task.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                                         </span>
@@ -671,6 +1007,8 @@ export default function TaskBoard() {
               ))}
             </div>
           </DragDropContext>
+            </>
+          )}
         </>
       )}
 
@@ -843,15 +1181,30 @@ export default function TaskBoard() {
                         <div
                           key={sub.id}
                           onClick={() => handleToggleSubtask(sub.id, sub.isCompleted)}
-                          className="flex items-center gap-3 p-3 bg-slate-950/20 border border-slate-900 rounded-xl hover:border-slate-800 cursor-pointer transition-all"
+                          className="group flex items-center justify-between p-3 bg-slate-950/20 border border-slate-900 rounded-xl hover:border-slate-800 cursor-pointer transition-all"
                         >
-                          <input
-                            type="checkbox"
-                            checked={sub.isCompleted}
-                            onChange={() => {}} // toggled by container div click
-                            className="rounded border-slate-800 bg-slate-950 text-primary cursor-pointer focus:ring-0 focus:ring-offset-0"
-                          />
-                          <span className={`text-xs ${sub.isCompleted ? 'text-slate-550 line-through' : 'text-slate-300'}`}>{sub.title}</span>
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={sub.isCompleted}
+                              onChange={() => {}}
+                              className="rounded border-slate-800 bg-slate-950 text-primary cursor-pointer focus:ring-0 focus:ring-offset-0"
+                            />
+                            <span className={`text-xs truncate ${sub.isCompleted ? 'text-slate-550 line-through' : 'text-slate-300'}`}>
+                              {sub.title}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteSubtask(sub.id);
+                            }}
+                            className="opacity-0 group-hover:opacity-100 hover:text-red-400 text-slate-500 p-1 transition-opacity ml-2"
+                            title="Delete subtask"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       ))
                     ) : (
@@ -899,45 +1252,60 @@ export default function TaskBoard() {
                 </div>
               </div>
 
-              {/* Right pane: metadata stats cards */}
+              {/* Right pane: interactive metadata controls */}
               <div className="md:col-span-4 space-y-5">
                 <div className="glass-card rounded-2xl p-4 border border-slate-900 space-y-4 text-xs">
                   <div>
-                    <span className="text-slate-500 block mb-1">Stage Status</span>
-                    <span className="px-2 py-0.5 bg-primary/15 text-primary rounded-md font-bold uppercase tracking-wider text-[10px] border border-primary/20">
-                      {columnTitles[activeTask.status]}
-                    </span>
+                    <label className="text-slate-500 block mb-1.5 font-semibold">Stage Status</label>
+                    <select
+                      value={activeTask.status}
+                      onChange={(e) => handleUpdateActiveTaskField('status', e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-primary/50 outline-none cursor-pointer"
+                    >
+                      <option value="TODO">{columnTitles.TODO}</option>
+                      <option value="IN_PROGRESS">{columnTitles.IN_PROGRESS}</option>
+                      <option value="REVIEW">{columnTitles.REVIEW}</option>
+                      <option value="COMPLETED">{columnTitles.COMPLETED}</option>
+                    </select>
                   </div>
 
                   <div>
-                    <span className="text-slate-500 block mb-1">Priority Level</span>
-                    <div className="flex items-center gap-1.5">
-                      <div className={`w-1.5 h-1.5 rounded-full ${(priorityConfig[activeTask.priority] || priorityConfig.LOW).dot}`} />
-                      <span className={`font-bold ${(priorityConfig[activeTask.priority] || priorityConfig.LOW).color}`}>
-                        {(priorityConfig[activeTask.priority] || priorityConfig.LOW).label}
-                      </span>
-                    </div>
+                    <label className="text-slate-500 block mb-1.5 font-semibold">Priority Level</label>
+                    <select
+                      value={activeTask.priority}
+                      onChange={(e) => handleUpdateActiveTaskField('priority', e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-white focus:border-primary/50 outline-none cursor-pointer"
+                    >
+                      <option value="LOW">Low Priority</option>
+                      <option value="MEDIUM">Medium Priority</option>
+                      <option value="HIGH">High Priority</option>
+                    </select>
                   </div>
 
                   <div>
-                    <span className="text-slate-500 block mb-1">Task Due Date</span>
-                    <span className="font-mono text-slate-300">
-                      {activeTask.dueDate ? new Date(activeTask.dueDate).toLocaleDateString() : 'No Deadline'}
-                    </span>
+                    <label className="text-slate-500 block mb-1.5 font-semibold">Task Due Date</label>
+                    <input
+                      type="date"
+                      value={activeTask.dueDate ? activeTask.dueDate.split('T')[0] : ''}
+                      onChange={(e) => handleUpdateActiveTaskField('dueDate', e.target.value ? new Date(e.target.value).toISOString() : null)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:border-primary/50 outline-none cursor-pointer font-mono"
+                    />
                   </div>
 
                   <div>
-                    <span className="text-slate-500 block mb-1">Assignee Allocation</span>
-                    {activeTask.assignee ? (
-                      <div className="flex items-center gap-2 bg-slate-950/40 p-2 border border-slate-900 rounded-lg">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${getAvatarColor(activeTask.assignee.name)}`}>
-                          {activeTask.assignee.name.charAt(0).toUpperCase()}
-                        </div>
-                        <span className="font-semibold text-slate-350">{activeTask.assignee.name}</span>
-                      </div>
-                    ) : (
-                      <span className="text-slate-600 italic">Unassigned</span>
-                    )}
+                    <label className="text-slate-500 block mb-1.5 font-semibold">Assignee Allocation</label>
+                    <select
+                      value={activeTask.assigneeId || ''}
+                      onChange={(e) => handleUpdateActiveTaskField('assigneeId', e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:border-primary/50 outline-none cursor-pointer"
+                    >
+                      <option value="">Unassigned</option>
+                      {projectMembers.map((m: any) => (
+                        <option key={m.user.id} value={m.user.id}>
+                          {m.user.name} ({m.role})
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>

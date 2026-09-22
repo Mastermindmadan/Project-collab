@@ -59,13 +59,24 @@ export default function Reports() {
       const ps: any[] = [];
       ts.forEach((t: any) => (t.projects || []).forEach((p: any) => ps.push({ ...p, teamName: t.name })));
       setProjects(ps);
-      if (ps.length > 0) setSelectedId(ps[0].id);
+      const urlProjectId = new URLSearchParams(window.location.search).get('project');
+      if (urlProjectId && ps.some((p) => p.id === urlProjectId)) {
+        setSelectedType('project');
+        setSelectedId(urlProjectId);
+      } else if (ps.length > 0) {
+        setSelectedId(ps[0].id);
+      }
     }).catch(() => {});
   }, []);
 
   useEffect(() => {
+    const urlProjectId = new URLSearchParams(window.location.search).get('project');
     if (selectedType === 'project' || selectedType === 'tasks' || selectedType === 'github') {
-      if (projects.length > 0) setSelectedId(projects[0].id);
+      if (urlProjectId && projects.some((p) => p.id === urlProjectId)) {
+        setSelectedId(urlProjectId);
+      } else if (projects.length > 0 && !selectedId) {
+        setSelectedId(projects[0].id);
+      }
     } else if (selectedType === 'team' || selectedType === 'members') {
       if (teams.length > 0) setSelectedId(teams[0].id);
     }

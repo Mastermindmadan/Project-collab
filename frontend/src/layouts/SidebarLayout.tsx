@@ -3,14 +3,16 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { useAuthStore } from '../store/auth.store';
 import {
-  LayoutDashboard, Users, FolderOpen, MessageSquare, Zap, Bell,
+  LayoutDashboard, Users, FolderOpen, MessageSquare, Bell,
   Settings as SettingsIcon, Search, ShieldAlert, Menu, X,
-  CheckSquare, BarChart3, Github, CalendarDays, HardDrive,
-  FileBarChart, Users2, ArrowRight, Loader2, Mail, Lock, BrainCircuit, Rocket
+  CheckSquare, BarChart3, CalendarDays, Video,
+  ArrowRight, Loader2, Mail, Lock,
+  Github, Brain, FileBarChart, HardDrive, Rocket
 } from 'lucide-react';
 import GlobalSearch from '../components/GlobalSearch';
 import AccountSwitcher from '../components/AccountSwitcher';
 import api from '../utils/api';
+import { useProjectStore } from '../store/project.store';
 
 interface SidebarLayoutProps { children: React.ReactNode; }
 
@@ -18,7 +20,9 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { addAccount, accessToken, updateUser } = useAuthStore();
-  const activeUserId = useAuthStore((s) => s.user?.id);
+  const currentUser = useAuthStore((s) => s.user);
+  const activeUserId = currentUser?.id;
+  const { activeProjectId, activeProject, userProjects, fetchUserProjects, switchProject } = useProjectStore();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
@@ -63,6 +67,21 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       })
       .catch(() => { /* non-critical, ignore */ });
   }, [accessToken, activeUserId]);
+
+  useEffect(() => {
+    if (accessToken) {
+      fetchUserProjects();
+    }
+  }, [accessToken, activeUserId]);
+
+  const getNavPath = (basePath: string) => {
+    if (!activeProjectId) return basePath;
+    const projectScopedPaths = ['/tasks', '/github', '/ai-pm', '/deploy', '/reports', '/meetings', '/drive', '/analytics'];
+    if (projectScopedPaths.includes(basePath)) {
+      return `${basePath}?project=${activeProjectId}`;
+    }
+    return basePath;
+  };
 
   // 1. Pure REST catch-up sync on app mount (unaffected by socket state or backend sleep)
   useEffect(() => {
@@ -213,16 +232,16 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
 
 
   const aiProviderLabels = {
-    gemini: { label: 'Gemini AI', badgeCls: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
-    groq: { label: 'Groq', badgeCls: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' },
-    openai: { label: 'OpenAI GPT', badgeCls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+    gemini: { label: 'Project Intelligence', badgeCls: 'bg-primary/10 text-primary border-primary/20' },
+    groq: { label: 'Project Intelligence (Fast)', badgeCls: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' },
+    openai: { label: 'Project Intelligence (Deep)', badgeCls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
   } as const;
 
   const aiFeatureLabels: Record<string, string> = {
-    planner: 'AI Planner',
+    planner: 'Sprint Planner',
     analyzer: 'Requirement Analyzer',
     risk: 'Risk Detection',
-    aipm: 'AI Project Manager',
+    aipm: 'Project Intelligence',
   };
 
   // Derived per-feature quota rows for the hover tooltip (used / limit / remaining)
@@ -239,7 +258,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
   const aiStatusConfig = {
     online: { label: currentProviderConfig.label, dot: 'bg-emerald-500', text: 'text-emerald-400' },
     slow: { label: `${currentProviderConfig.label} (Slow)`, dot: 'bg-amber-400', text: 'text-amber-400' },
-    unavailable: { label: 'AI Offline', dot: 'bg-red-500', text: 'text-red-400' },
+    unavailable: { label: 'Project Intelligence Offline', dot: 'bg-red-500', text: 'text-red-400' },
   } as const;
   const currentAiStatus = aiStatusConfig[aiStatus];
 
@@ -249,30 +268,38 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       label: 'Workspace',
       items: [
         { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-        { name: 'Analytics', path: '/analytics', icon: BarChart3 },
-        { name: 'Member Analytics', path: '/analytics/members', icon: Users2 },
-        { name: 'Notifications', path: '/notifications', icon: Bell, badge: unreadCount },
+      ],
+    },
+    {
+      label: 'Projects & Tasks',
+      items: [
+        { name: 'Projects', path: '/projects', icon: FolderOpen },
+        { name: 'Task Board', path: '/tasks', icon: CheckSquare },
+        { name: 'My Tasks', path: '/my-tasks', icon: CheckSquare },
+      ],
+    },
+    {
+      label: 'Dev & Intelligence',
+      items: [
+        { name: 'GitHub Activity', path: '/github', icon: Github },
+        { name: 'Project Intelligence', path: '/ai-pm', icon: Brain },
+        { name: 'Drive & Documents', path: '/drive', icon: HardDrive },
+        { name: 'Deployments', path: '/deploy', icon: Rocket },
       ],
     },
     {
       label: 'Collaboration',
       items: [
         { name: 'My Teams', path: '/teams', icon: Users },
-        { name: 'Projects', path: '/projects', icon: FolderOpen },
-        { name: 'Tasks', path: '/tasks', icon: CheckSquare },
         { name: 'Team Chat', path: '/chat', icon: MessageSquare },
-        { name: 'Meetings', path: '/meetings', icon: Bell },
+        { name: 'Meetings', path: '/meetings', icon: Video },
         { name: 'Calendar', path: '/calendar', icon: CalendarDays },
-        { name: 'Drive', path: '/drive', icon: HardDrive },
       ],
     },
     {
-      label: 'Intelligence',
+      label: 'Insights',
       items: [
-        { name: 'AI Planner', path: '/ai', icon: Zap },
-        { name: 'AI Project Manager', path: '/ai-pm', icon: BrainCircuit },
-        { name: 'GitHub', path: '/github', icon: Github },
-        { name: 'Deployment', path: '/deploy', icon: Rocket },
+        { name: 'Analytics', path: '/analytics', icon: BarChart3 },
         { name: 'Reports', path: '/reports', icon: FileBarChart },
       ],
     },
@@ -376,19 +403,51 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       )}
 
       {/* Mobile Topbar */}
-      <div className="md:hidden flex items-center justify-between p-4 border-b border-border glass-panel sticky top-0 z-40">
-        <div className="flex items-center gap-2">
-          <ShieldAlert className="w-6 h-6 text-primary" />
-          <span className="font-bold text-foreground tracking-wider">ProjectCollab AI</span>
+      <div className="md:hidden flex flex-col p-3 border-b border-border glass-panel sticky top-0 z-40 gap-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="w-5 h-5 text-primary" />
+            <span className="font-bold text-foreground text-sm tracking-wider">ProjectCollab AI</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setSearchOpen(true)} className="p-1.5 text-muted-foreground hover:text-foreground">
+              <Search className="w-4 h-4" />
+            </button>
+            <button onClick={() => setMobileOpen(!mobileOpen)} className="p-1.5 text-muted-foreground hover:text-foreground">
+              {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setSearchOpen(true)} className="p-1.5 text-muted-foreground hover:text-foreground">
-            <Search className="w-5 h-5" />
-          </button>
-          <button onClick={() => setMobileOpen(!mobileOpen)} className="p-1.5 text-muted-foreground hover:text-foreground">
-            {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-          </button>
-        </div>
+        {userProjects.length > 0 && (
+          <div className="flex items-center justify-between px-2.5 py-1 rounded-lg bg-secondary/50 border border-border text-xs">
+            <div className="flex items-center gap-1.5">
+              <FolderOpen className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+              <span className="text-[10px] font-black uppercase text-muted-foreground">PROJECT:</span>
+            </div>
+            <select
+              value={activeProjectId || ''}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === '__ALL__') {
+                  switchProject('');
+                  navigate('/projects');
+                } else {
+                  switchProject(val);
+                }
+              }}
+              className="bg-transparent font-bold text-foreground text-xs focus:outline-none cursor-pointer"
+            >
+              {userProjects.map((p) => (
+                <option key={p.id} value={p.id} className="bg-slate-900 text-slate-100">
+                  {p.title}
+                </option>
+              ))}
+              <option value="__ALL__" className="bg-slate-900 text-primary font-bold">
+                ⚡ All Projects
+              </option>
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Mobile drawer backdrop */}
@@ -421,9 +480,14 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
               <div className="space-y-0.5">
                 {group.items.map((item) => {
                   const Icon = item.icon;
-                  const isActive = location.pathname === item.path;
+                  const isActive = item.path.includes('?')
+                    ? `${location.pathname}${location.search}` === item.path
+                    : location.pathname === item.path ||
+                      (item.path === '/drive' && location.pathname === '/documents') ||
+                      (item.path === '/ai-pm' && (location.pathname === '/ai' || location.pathname === '/intelligence'));
+                  const linkTarget = item.path.includes('?') ? item.path : getNavPath(item.path);
                   return (
-                    <Link key={item.name} to={item.path} onClick={() => setMobileOpen(false)}
+                    <Link key={item.name} to={linkTarget} onClick={() => setMobileOpen(false)}
                       className={`
                         flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group
                         ${isActive ? 'bg-primary text-primary-foreground glow-primary font-semibold' : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'}
@@ -445,15 +509,6 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
 
         {/* Account Switcher Footer */}
         <div className="pt-4 border-t border-border mt-auto">
-          <div className={`mb-3 flex items-center justify-between px-3 py-2 rounded-xl bg-secondary/40 border border-border text-xs font-semibold ${currentAiStatus.text}`}>
-            <div className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${currentAiStatus.dot} ${aiStatus === 'online' ? 'animate-pulse' : ''}`} />
-              <span>{currentAiStatus.label}</span>
-            </div>
-            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase border ${currentProviderConfig.badgeCls}`}>
-              {activeProvider}
-            </span>
-          </div>
           <AccountSwitcher onAddAccount={() => setShowAddAccount(true)} />
         </div>
 
@@ -463,48 +518,104 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       <div className="flex-1 flex flex-col min-w-0 md:h-screen md:overflow-y-auto">
 
         {/* Topbar */}
-        <header className="hidden md:flex items-center justify-between px-8 py-4 border-b border-border glass-panel sticky top-0 z-30">
+        <header className="hidden md:flex items-center justify-between px-6 lg:px-8 h-16 border-b border-border glass-panel sticky top-0 z-30 gap-4">
 
-          {/* Global Search */}
-          <button onClick={() => setSearchOpen(true)}
-            className="flex items-center gap-2 w-80 px-3 py-2 glass-input rounded-xl text-sm text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all group">
-            <Search className="w-4 h-4 flex-shrink-0" />
-            <span className="flex-1 text-left text-xs">Search projects, tasks, people...</span>
-            <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
-              <kbd className="px-1.5 py-0.5 text-[10px] bg-secondary rounded font-mono">Ctrl</kbd>
-              <kbd className="px-1.5 py-0.5 text-[10px] bg-secondary rounded font-mono">K</kbd>
+          {/* Left Section: Global Search & Project Context */}
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            {/* Global Search */}
+            <button
+              onClick={() => setSearchOpen(true)}
+              className="flex items-center gap-2.5 w-48 sm:w-56 md:w-60 lg:w-72 h-9 px-3 glass-input rounded-xl text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all group flex-shrink-0"
+            >
+              <Search className="w-3.5 h-3.5 text-slate-400 group-hover:text-primary transition-colors flex-shrink-0" />
+              <span className="flex-1 text-left text-xs truncate">Search projects, tasks, people...</span>
+              <div className="hidden sm:flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                <kbd className="px-1.5 py-0.5 text-[10px] bg-secondary rounded font-mono">Ctrl</kbd>
+                <kbd className="px-1.5 py-0.5 text-[10px] bg-secondary rounded font-mono">K</kbd>
+              </div>
+            </button>
+
+            {/* Persistent Project Context Selector */}
+            <div className="flex items-center gap-2 h-9 px-3 rounded-xl bg-secondary/50 border border-border/80 hover:border-border text-xs shadow-sm transition-all min-w-0">
+              <FolderOpen className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+              <select
+                value={activeProjectId || ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === '__ALL__') {
+                    switchProject('');
+                    navigate('/projects');
+                  } else {
+                    switchProject(val);
+                    const currentParam = new URLSearchParams(location.search);
+                    if (currentParam.has('project') || ['/tasks', '/ai-pm', '/github', '/reports', '/analytics', '/drive', '/meetings'].includes(location.pathname)) {
+                      navigate(`${location.pathname}?project=${val}`);
+                    }
+                  }
+                }}
+                className="bg-transparent font-semibold text-foreground text-xs focus:outline-none cursor-pointer max-w-[130px] sm:max-w-[170px] md:max-w-[210px] truncate"
+                title={activeProject ? activeProject.title : 'Select Project'}
+              >
+                {userProjects.length === 0 ? (
+                  <option value="" className="bg-slate-900 text-slate-400">No Projects</option>
+                ) : (
+                  <>
+                    {userProjects.map((p) => (
+                      <option key={p.id} value={p.id} className="bg-slate-900 text-slate-100">
+                        {p.title}
+                      </option>
+                    ))}
+                    <option value="__ALL__" className="bg-slate-900 text-primary font-bold">
+                      ⚡ All Projects View...
+                    </option>
+                  </>
+                )}
+              </select>
+
+              {activeProject?.teamName && (
+                <div className="hidden xl:flex items-center gap-1.5 pl-2 border-l border-border text-muted-foreground flex-shrink-0">
+                  <Users className="w-3 h-3 text-secondary-foreground flex-shrink-0" />
+                  <span className="font-medium text-[11px] text-foreground max-w-[110px] truncate" title={activeProject.teamName}>
+                    {activeProject.teamName}
+                  </span>
+                </div>
+              )}
             </div>
-          </button>
+          </div>
 
           {/* Right Controls */}
-          <div className="flex items-center gap-3 relative">
+          <div className="flex items-center gap-2.5 flex-shrink-0">
             {/* AI Provider Indicator Badge — hover for usage/quota & rate tooltip */}
             <div className="relative group">
-              <div className={`px-2.5 py-1 rounded-xl text-xs font-semibold border flex items-center gap-1.5 ${currentProviderConfig.badgeCls}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${currentAiStatus.dot}`} />
-                <span>{currentProviderConfig.label}</span>
+              <div
+                onClick={() => {
+                  if (activeProjectId) {
+                    navigate(`/projects/${activeProjectId}?tab=ai`);
+                  } else {
+                    navigate('/ai-pm');
+                  }
+                }}
+                title="Click to open Project Intelligence"
+                className={`h-9 px-3 rounded-xl text-xs font-semibold border flex items-center gap-2 cursor-pointer transition-all hover:brightness-110 active:scale-95 ${currentProviderConfig.badgeCls}`}
+              >
+                <span className={`w-2 h-2 rounded-full ${currentAiStatus.dot} shadow-[0_0_6px_rgba(52,211,153,0.4)]`} />
+                <span className="whitespace-nowrap">{currentProviderConfig.label}</span>
               </div>
-              <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 z-50 w-72 rounded-xl border border-border bg-slate-950/95 backdrop-blur p-4 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto">
+              <div className="absolute right-0 top-full mt-2 z-50 w-72 rounded-xl border border-border bg-slate-950/95 backdrop-blur p-4 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto shadow-2xl">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-extrabold text-purple-400">Gemini API</span>
+                  <span className="text-xs font-extrabold text-primary">Project Intelligence Engine</span>
                   <span className={`text-[10px] font-bold uppercase flex items-center gap-1 ${currentAiStatus.text}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${currentAiStatus.dot}`} /> {currentAiStatus.label}
                   </span>
                 </div>
                 <div className="space-y-1.5 text-[11px] text-slate-400">
                   <p className="flex justify-between">
-                    <span>Active provider</span>
-                    <span className="font-semibold text-slate-300">{aiHealthDetail?.activeProvider ?? activeProvider}</span>
+                    <span>Engine status</span>
+                    <span className="font-semibold text-slate-300">Operational</span>
                   </p>
                   <p className="flex justify-between">
-                    <span>Key pool</span>
-                    <span className="font-semibold text-slate-300">{aiHealthDetail?.activeKeyDisplay ?? '—'}</span>
-                  </p>
-                  <p className="flex justify-between">
-                    <span>Keys / exhausted</span>
-                    <span className="font-semibold text-slate-300">
-                      {aiHealthDetail?.totalGeminiKeys ?? 0} / {aiHealthDetail?.exhaustedKeysCount ?? 0}
-                    </span>
+                    <span>Failover resilience</span>
+                    <span className="font-semibold text-slate-300">Enabled</span>
                   </p>
                   <p className="flex justify-between">
                     <span>Cache hits (saved credits)</span>
@@ -535,20 +646,31 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
                     })}
                   </div>
                 )}
+                <button
+                  onClick={() => {
+                    if (activeProjectId) {
+                      navigate(`/projects/${activeProjectId}?tab=ai`);
+                    } else {
+                      navigate('/ai-pm');
+                    }
+                  }}
+                  className="w-full mt-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 rounded-xl text-xs font-bold transition-all text-center flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Brain className="w-3.5 h-3.5" /> Open Project Intelligence →
+                </button>
               </div>
             </div>
 
             {/* Notifications */}
             <div className="relative">
-
               <button
                 onClick={handleToggleNotifMenu}
                 aria-label="View notifications"
-                className="p-2 rounded-xl hover:bg-secondary border border-transparent hover:border-border text-muted-foreground hover:text-foreground transition-all relative"
+                className="h-9 w-9 rounded-xl flex items-center justify-center hover:bg-secondary border border-transparent hover:border-border text-muted-foreground hover:text-foreground transition-all relative"
               >
                 <Bell className="w-4 h-4" />
                 {unreadCount > 0 && (
-                  <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-primary glow-primary animate-pulse" />
+                  <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-primary glow-primary animate-pulse" />
                 )}
               </button>
               {showNotifMenu && (
@@ -587,7 +709,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
             </div>
 
             {/* Account Switcher (Topbar compact) */}
-            <AccountSwitcher onAddAccount={() => setShowAddAccount(true)} />
+            <AccountSwitcher onAddAccount={() => setShowAddAccount(true)} placement="bottom" compact />
           </div>
         </header>
 

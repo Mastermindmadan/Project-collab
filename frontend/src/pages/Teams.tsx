@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/auth.store';
+import { useProjectStore } from '../store/project.store';
 import api from '../utils/api';
 import {
   Users, Plus, Copy, QrCode, Link as LinkIcon, Crown, Shield,
-  UserCheck, X, Search, LogOut, Trash2, Loader2
+  UserCheck, X, Search, LogOut, Trash2, Loader2, FolderOpen, ArrowRight
 } from 'lucide-react';
 
 interface TeamMember {
@@ -41,7 +43,9 @@ const roleConfig = {
 };
 
 export default function Teams() {
+  const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.user);
+  const { switchProject } = useProjectStore();
 
   // States
   const [teams, setTeams] = useState<Team[]>([]);
@@ -60,7 +64,7 @@ export default function Teams() {
   const [joinInviteCode, setJoinInviteCode] = useState('');
 
   // Copy state
-  const [copied, setCopied] = useState<'code' | 'link' | null>(null);
+  const [copied, setCopied] = useState<'code' | 'link' | 'id' | null>(null);
   const [activeInviteTab, setActiveInviteTab] = useState<'code' | 'qr' | 'link'>('code');
 
   // Load teams list
@@ -261,7 +265,7 @@ export default function Teams() {
           </p>
           <h1 className="text-3xl font-extrabold text-white tracking-tight">Teams</h1>
           <p className="text-slate-500 text-sm mt-1">
-            Create or join collaborative team workspaces to manage academic modules and milestones.
+            Create teams, manage projects, assign tasks, and track progress together.
           </p>
         </div>
         <div className="flex gap-2">
@@ -363,7 +367,20 @@ export default function Teams() {
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
                       <h2 className="text-2xl font-bold text-white tracking-tight">{selectedTeam.name}</h2>
-                      <p className="text-xs text-slate-500 mt-1 font-mono">WORKSPACE ID: {selectedTeam.id}</p>
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <span className="text-[11px] text-slate-500 font-mono">Workspace ID</span>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(selectedTeam.id);
+                            setCopied('id');
+                            setTimeout(() => setCopied(null), 2000);
+                          }}
+                          className="text-[10px] px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-all cursor-pointer font-mono"
+                          title="Click to copy ID"
+                        >
+                          {copied === 'id' ? '✓ Copied ID' : 'Copy ID'}
+                        </button>
+                      </div>
                     </div>
                     <div className="flex gap-2">
                       <button
@@ -383,34 +400,82 @@ export default function Teams() {
                 </div>
 
                 {/* Team Projects section */}
-                {selectedTeam.projects && selectedTeam.projects.length > 0 && (
-                  <div>
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Enrolled Workspace Projects</h3>
+                <div className="glass-panel rounded-2xl p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-base font-bold text-white flex items-center gap-2">
+                        <FolderOpen className="w-5 h-5 text-indigo-400" />
+                        Team Projects
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">Projects created and shared under this team workspace.</p>
+                    </div>
+                    <Link
+                      to="/projects?create=true"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-xs font-medium rounded-lg border border-indigo-500/30 transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> New Project
+                    </Link>
+                  </div>
+
+                  {selectedTeam.projects && selectedTeam.projects.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {selectedTeam.projects.map((p) => (
-                        <div key={p.id} className="p-4 bg-slate-900/40 border border-slate-850 rounded-xl flex items-center justify-between">
-                          <div>
-                            <h4 className="font-semibold text-white text-sm">{p.title}</h4>
-                            <p className="text-xs text-slate-500 mt-0.5">Status: <span className={p.status === 'HEALTHY' ? 'text-emerald-400' : 'text-red-400'}>{p.status}</span></p>
+                        <div key={p.id} className="p-4 bg-slate-900/60 border border-slate-800 hover:border-indigo-500/40 rounded-xl transition-all group flex flex-col justify-between">
+                          <div className="flex items-start justify-between gap-3 mb-3">
+                            <div>
+                              <h4 className="font-semibold text-white text-sm group-hover:text-indigo-400 transition-colors">{p.title}</h4>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                                  p.status === 'HEALTHY' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                                  p.status === 'ATTENTION' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                                  'bg-red-500/10 text-red-400 border border-red-500/20'
+                                }`}>
+                                  {p.status}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <span className={`text-sm font-bold ${p.healthScore >= 75 ? 'text-emerald-400' : p.healthScore >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                                {p.healthScore}%
+                              </span>
+                              <p className="text-[10px] text-slate-500">health</p>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <span className={`text-sm font-bold ${p.healthScore >= 75 ? 'text-emerald-400' : p.healthScore >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
-                              {p.healthScore}%
-                            </span>
-                            <p className="text-[10px] text-slate-600">health</p>
-                          </div>
+
+                          <button
+                            onClick={() => {
+                              switchProject(p.id);
+                              navigate(`/projects/${p.id}`);
+                            }}
+                            className="w-full mt-2 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 text-xs font-semibold rounded-lg border border-indigo-500/20 hover:border-indigo-500/40 transition-colors"
+                          >
+                            Open Project Workspace
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    <div className="text-center py-6 border border-dashed border-slate-800 rounded-xl">
+                      <FolderOpen className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                      <p className="text-xs text-slate-400 font-medium">No projects associated with this team yet.</p>
+                      <p className="text-[11px] text-slate-600 mt-0.5">Start collaborating by creating a project for your team.</p>
+                      <Link
+                        to="/projects?create=true"
+                        className="inline-flex items-center gap-1.5 mt-3 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Create Project
+                      </Link>
+                    </div>
+                  )}
+                </div>
 
                 {/* Members list */}
                 <div className="glass-panel rounded-2xl p-6">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                     <div>
-                      <h3 className="text-base font-bold text-white">Member Directory</h3>
-                      <p className="text-xs text-slate-500 mt-0.5">Users matching database roster criteria for team access</p>
+                      <h3 className="text-base font-bold text-white">Team Members</h3>
+                      <p className="text-xs text-slate-500 mt-0.5">Find and manage workspace members.</p>
                     </div>
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />

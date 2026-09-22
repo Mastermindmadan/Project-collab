@@ -83,6 +83,10 @@ export default function Analytics() {
       });
 
       setProjects(loadedProjects);
+      const urlProjectId = new URLSearchParams(window.location.search).get('project');
+      if (urlProjectId && loadedProjects.some((p) => p.id === urlProjectId)) {
+        setSelectedProjectId(urlProjectId);
+      }
     } catch (err) {
       console.error('Failed to load analytics data', err);
       setError('Failed to fetch project analytics.');
@@ -299,7 +303,7 @@ export default function Analytics() {
             <p className="text-sm text-muted-foreground max-w-xl mb-4 leading-relaxed">
               {selectedSingleProject
                 ? `Specific report for ${selectedSingleProject.title}: ${selectedSingleProject.description}`
-                : 'Aggregated workspace report across all registered academic team projects.'}
+                : 'Aggregated workspace report across all your team projects.'}
             </p>
             <div className="flex items-center justify-center md:justify-start gap-4 text-xs font-semibold text-muted-foreground">
               <div className="flex items-center gap-1.5">

@@ -12,8 +12,8 @@ export default function Login() {
   const navigate = useNavigate();
   const { addAccount } = useAuthStore();
 
-  const [email, setEmail] = useState('rohan@university.edu');
-  const [password, setPassword] = useState('password123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -34,9 +34,21 @@ export default function Login() {
       const { user, accessToken, refreshToken } = response.data;
       addAccount(user, accessToken, refreshToken);
       toast.success(`Welcome back, ${user.name}! Login successful.`, {
-        description: 'Redirecting to dashboard...',
+        description: 'Redirecting...',
         style: { fontSize: '0.85rem', fontFamily: 'Inter, sans-serif' }
       });
+      const pendingInvite = localStorage.getItem('pending_invite_code') || new URLSearchParams(window.location.search).get('invite');
+      if (pendingInvite) {
+        try {
+          await api.post('/teams/join', { inviteCode: pendingInvite.trim().toUpperCase() });
+          localStorage.removeItem('pending_invite_code');
+          toast.success('Joined team workspace!');
+          setTimeout(() => navigate('/projects'), 1200);
+          return;
+        } catch {
+          localStorage.removeItem('pending_invite_code');
+        }
+      }
       setTimeout(() => navigate('/'), 1200);
     } catch (err: any) {
       console.error(err);
@@ -123,7 +135,7 @@ export default function Login() {
             ProjectCollab AI
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 font-medium">
-            Academic Project Management & AI Collaboration Platform
+            Collaborative Project Management &amp; Engineering Platform
           </p>
         </div>
 
@@ -142,7 +154,7 @@ export default function Login() {
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label className="block text-xs font-semibold text-foreground mb-1.5" htmlFor="email">
-                Institutional Email Address
+                Email Address
               </label>
               <div className="relative flex items-center">
                 <div className="absolute left-3.5 pointer-events-none text-muted-foreground z-10 flex items-center justify-center">
@@ -151,7 +163,7 @@ export default function Login() {
                 <input
                   id="email"
                   type="email"
-                  placeholder="rohan@university.edu"
+                  placeholder="you@company.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="glass-input w-full !pl-11 pr-4 h-11 text-sm font-medium"
@@ -226,7 +238,7 @@ export default function Login() {
 
           <div className="mt-6 pt-5 border-t border-border text-center">
             <p className="text-xs text-muted-foreground">
-              New academic collaborator?{' '}
+              New to ProjectCollab?{' '}
               <Link to="/register" className="text-primary font-bold hover:underline">
                 Create an account
               </Link>

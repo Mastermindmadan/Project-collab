@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/auth.store';
 import api from '../utils/api';
 import { Shield, Mail, Lock, Eye, EyeOff, User as UserIcon, Loader2, ArrowRight, X, Plus } from 'lucide-react';
+import { toast } from 'sonner';
 
 export default function Register() {
   const navigate = useNavigate();
@@ -23,8 +24,8 @@ export default function Register() {
     const tag = skillInput.trim();
     if (tag && !skills.includes(tag)) {
       setSkills([...skills, tag]);
+      setSkillInput('');
     }
-    setSkillInput('');
   };
 
   const removeSkill = (tag: string) => {
@@ -52,6 +53,18 @@ export default function Register() {
       const { user, accessToken, refreshToken } = response.data;
       
       loginStore(user, accessToken, refreshToken);
+      const pendingInvite = localStorage.getItem('pending_invite_code') || new URLSearchParams(window.location.search).get('invite');
+      if (pendingInvite) {
+        try {
+          await api.post('/teams/join', { inviteCode: pendingInvite.trim().toUpperCase() });
+          localStorage.removeItem('pending_invite_code');
+          toast.success('Account created and joined workspace!');
+          navigate('/projects');
+          return;
+        } catch {
+          localStorage.removeItem('pending_invite_code');
+        }
+      }
       navigate('/');
     } catch (err: any) {
       console.error(err);
@@ -77,13 +90,13 @@ export default function Register() {
             ProjectCollab AI
           </h1>
           <p className="text-sm text-muted-foreground mt-2">
-            Register your academic user account
+            Create your account to start collaborating
           </p>
         </div>
 
         {/* Card */}
         <div className="glass-panel rounded-2xl p-8 shadow-2xl relative border-slate-800">
-          <h2 className="text-xl font-semibold text-white mb-6">Create Academic Account</h2>
+          <h2 className="text-xl font-semibold text-white mb-6">Create Account</h2>
 
           {error && (
             <div className="mb-4 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs">
@@ -91,165 +104,147 @@ export default function Register() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} autoComplete="off" className="space-y-5">
-            {/* Off-screen decoy username/password pair. Browsers and password
-                managers target inputs named "username"/"password" when autofilling
-                saved credentials; placing them off-screen (not display:none, which
-                autofill ignores) makes the manager fill these instead of the real
-                registration fields, keeping name/email starting empty. */}
-            <div aria-hidden="true" style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '1px', height: '1px', overflow: 'hidden' }}>
-              <input type="text" name="username" tabIndex={-1} autoComplete="username" readOnly onFocus={(e) => e.currentTarget.blur()} />
-              <input type="password" name="password" tabIndex={-1} autoComplete="new-password" readOnly onFocus={(e) => e.currentTarget.blur()} />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1.5" htmlFor="name">
-                  Full Name
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                    <UserIcon className="w-4 h-4" />
-                  </div>
-                  <input
-                     id="name"
-                     type="text"
-                     name="reg_fullname"
-                     placeholder="Full Name"
-                     autoComplete="off"
-                     value={name}
-                     onChange={(e) => setName(e.target.value)}
-                     className="w-full pl-10 pr-4 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white placeholder:text-slate-600 transition-all"
-                     required
-                   />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1.5" htmlFor="role">
-                  Academic Role
-                </label>
-                <select
-                  id="role"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as 'STUDENT' | 'INSTRUCTOR')}
-                  className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white transition-all cursor-pointer"
-                >
-                  <option value="STUDENT" className="bg-slate-950">Student</option>
-                  <option value="INSTRUCTOR" className="bg-slate-950">Instructor / Assessor</option>
-                </select>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1.5" htmlFor="name">
+                Full Name
+              </label>
+              <div className="relative">
+                <UserIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  id="name"
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Alex Morgan"
+                  className="w-full pl-10 pr-4 py-2.5 bg-slate-900/50 border border-slate-700/60 rounded-xl text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                />
               </div>
             </div>
 
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1.5" htmlFor="email">
-                Institutional Email Address
+                Email Address
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                  <Mail className="w-4 h-4" />
-                </div>
-                  <input
-                     id="email"
-                     type="email"
-                     name="reg_email"
-                     placeholder="Institutional Email"
-                     autoComplete="off"
-                     value={email}
-                     onChange={(e) => setEmail(e.target.value)}
-                     className="w-full pl-10 pr-4 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white placeholder:text-slate-600 transition-all"
-                     required
-                   />
+                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  id="email"
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@organization.com"
+                  className="w-full pl-10 pr-4 py-2.5 bg-slate-900/50 border border-slate-700/60 rounded-xl text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                />
               </div>
             </div>
 
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1.5" htmlFor="password">
-                Create Secure Password
+                Password
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                  <Lock className="w-4 h-4" />
-                </div>
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
-                  name="reg_password"
-                  placeholder="••••••••••••"
-                  autoComplete="new-password"
+                  required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-10 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white placeholder:text-slate-600 transition-all"
-                  required
+                  placeholder="••••••••"
+                  className="w-full pl-10 pr-10 py-2.5 bg-slate-900/50 border border-slate-700/60 rounded-xl text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  title={showPassword ? 'Hide password' : 'Show password'}
-                  className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-300 transition-colors"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-white"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
 
-            {/* Skill tags input */}
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                Skills / Expertise (Tags)
-              </label>
-              <div className="flex gap-2 mb-2">
-                 <input
-                   type="text"
-                   name="reg_skills"
-                   placeholder="React, Node.js, Python, UI Design"
-                   value={skillInput}
-                   onChange={(e) => setSkillInput(e.target.value)}
-                   onKeyDown={(e) => e.key === 'Enter' && addSkill(e)}
-                   autoComplete="off"
-                   className="flex-1 px-4 py-2 bg-slate-950/40 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white placeholder:text-slate-600 transition-all"
-                 />
-                <button
-                  type="button"
-                  onClick={addSkill}
-                  className="p-2.5 bg-secondary hover:bg-secondary/80 text-white rounded-xl text-sm transition-all flex items-center justify-center cursor-pointer"
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1.5" htmlFor="role">
+                  Role
+                </label>
+                <select
+                  id="role"
+                  value={role}
+                  onChange={(e) => setRole(e.target.value as any)}
+                  className="w-full px-3 py-2.5 bg-slate-900/50 border border-slate-700/60 rounded-xl text-sm text-white focus:outline-none focus:border-primary transition-colors"
                 >
-                  <Plus className="w-4 h-4" />
-                </button>
+                  <option value="STUDENT">Student / Engineer</option>
+                  <option value="INSTRUCTOR">Instructor / Tech Lead</option>
+                </select>
               </div>
 
-              {skills.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 p-2 bg-slate-950/20 border border-slate-900 rounded-xl">
-                  {skills.map((tag) => (
-                    <span
-                      key={tag}
-                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-800 text-xs text-slate-200 border border-slate-700"
-                    >
-                      {tag}
-                      <button
-                        type="button"
-                        onClick={() => removeSkill(tag)}
-                        className="text-slate-400 hover:text-white"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </span>
-                  ))}
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1.5">
+                  Skills & Technologies
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={skillInput}
+                    onChange={(e) => setSkillInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addSkill(e);
+                      }
+                    }}
+                    placeholder="e.g. React"
+                    className="flex-1 px-3 py-2 bg-slate-900/50 border border-slate-700/60 rounded-xl text-xs text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+                  />
+                  <button
+                    type="button"
+                    onClick={addSkill}
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs flex items-center justify-center border border-slate-700"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-              )}
+              </div>
             </div>
+
+            {skills.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {skills.map((skill) => (
+                  <span
+                    key={skill}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 border border-primary/20 text-primary text-xs font-medium"
+                  >
+                    {skill}
+                    <button
+                      type="button"
+                      onClick={() => removeSkill(skill)}
+                      className="hover:text-white"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full mt-4 py-3 px-4 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-sm rounded-xl transition-all duration-300 flex items-center justify-center gap-2 group cursor-pointer"
+              className="w-full mt-2 py-3 px-4 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-xl text-sm transition-all duration-200 shadow-lg shadow-primary/25 flex items-center justify-center gap-2 group disabled:opacity-50"
             >
               {loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Creating Account...</span>
+                </>
               ) : (
                 <>
-                  Register & Enter Workspace
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  <span>Create Account</span>
+                  <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
                 </>
               )}
             </button>
@@ -257,7 +252,7 @@ export default function Register() {
 
           <div className="mt-8 pt-6 border-t border-slate-800/60 text-center">
             <p className="text-xs text-slate-400">
-              Already have an academic account?{' '}
+              Already have an account?{' '}
               <Link to="/login" className="text-primary font-medium hover:underline">
                 Sign In
               </Link>

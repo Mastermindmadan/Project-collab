@@ -47,7 +47,7 @@ export default function ForgotPassword() {
             <KeyRound className="w-8 h-8 text-amber-400" />
           </div>
           <h1 className="text-3xl font-extrabold text-white">Password Recovery</h1>
-          <p className="text-sm text-muted-foreground mt-2">ProjectCollab AI — Academic Platform</p>
+          <p className="text-sm text-muted-foreground mt-2">ProjectCollab AI</p>
         </div>
 
         <div className="glass-panel rounded-2xl p-8 shadow-2xl border-slate-800">
@@ -63,7 +63,7 @@ export default function ForgotPassword() {
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1.5" htmlFor="reset-email">
-                    Institutional Email Address
+                    Email Address
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
@@ -72,7 +72,7 @@ export default function ForgotPassword() {
                     <input
                       id="reset-email"
                       type="email"
-                      placeholder="student@university.edu"
+                      placeholder="you@company.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full pl-10 pr-4 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none text-sm text-white placeholder:text-slate-600 transition-all"

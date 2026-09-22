@@ -115,7 +115,7 @@ export default function OtpVerification() {
             <KeyRound className="w-8 h-8 text-amber-400" />
           </div>
           <h1 className="text-3xl font-extrabold text-white">OTP Verification</h1>
-          <p className="text-sm text-muted-foreground mt-2">ProjectCollab AI — Academic Platform</p>
+          <p className="text-sm text-muted-foreground mt-2">ProjectCollab AI</p>
         </div>
 
         <div className="glass-panel rounded-2xl p-8 shadow-2xl border-slate-800">

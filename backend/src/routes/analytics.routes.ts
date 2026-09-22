@@ -7,6 +7,75 @@ const router = Router();
 
 router.use(authenticateJWT);
 
+router.get('/', async (req, res) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const memberships = await prisma.teamMember.findMany({
+      where: { userId: authReq.user.id },
+      include: {
+        team: {
+          include: {
+            projects: {
+              include: {
+                tasks: { select: { id: true, status: true, priority: true } },
+                milestones: { select: { id: true, status: true } }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const projects: any[] = [];
+    let totalTasks = 0;
+    let completedTasks = 0;
+    let inProgressTasks = 0;
+    let reviewTasks = 0;
+    let todoTasks = 0;
+
+    memberships.forEach(m => {
+      m.team.projects.forEach(p => {
+        projects.push(p);
+        p.tasks.forEach(t => {
+          totalTasks++;
+          if (t.status === 'COMPLETED') completedTasks++;
+          else if (t.status === 'IN_PROGRESS') inProgressTasks++;
+          else if (t.status === 'REVIEW') reviewTasks++;
+          else todoTasks++;
+        });
+      });
+    });
+
+    const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+    res.json({
+      success: true,
+      totalProjects: projects.length,
+      taskStats: {
+        total: totalTasks,
+        completed: completedTasks,
+        inProgress: inProgressTasks,
+        review: reviewTasks,
+        todo: todoTasks,
+        completionRate
+      },
+      projects: projects.map(p => ({
+        id: p.id,
+        title: p.title,
+        status: p.status,
+        healthScore: p.healthScore,
+        taskCount: p.tasks.length,
+        milestoneCount: p.milestones.length
+      }))
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 router.get('/project/:projectId/summary', async (req, res) => {
   try {
     const authReq = req as AuthenticatedRequest;

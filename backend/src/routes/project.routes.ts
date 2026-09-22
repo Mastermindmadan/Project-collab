@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
-  createProject, getProjectDetails, getProjectSummary, updateProject, updateProjectDeploySettings, deleteProject,
+  getMyProjects,
+  createProject, createProjectWithTeam, getAvailableUsers, getProjectDetails, getProjectSummary, updateProject, updateProjectDeploySettings, deleteProject,
   createMilestone, updateMilestone, uploadDocument, getProjectMessages,
   connectRepository, getProjectRepositories, deleteProjectRepository
 } from '../controllers/project.controller';
@@ -10,6 +11,10 @@ const router = Router();
 
 router.use(authenticateJWT);
 
+router.get('/', getMyProjects);
+router.get('/my-projects', getMyProjects);
+router.get('/available-users', getAvailableUsers);
+router.post('/create-with-team', createProjectWithTeam);
 router.post('/create', createProject);
 router.get('/:projectId/summary', getProjectSummary);
 router.get('/:projectId', getProjectDetails);

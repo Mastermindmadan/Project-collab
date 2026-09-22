@@ -72,6 +72,86 @@ function getFileType(mime: string): string {
   return 'other';
 }
 
+// GET /api/drive — list all drive projects for user
+router.get('/', async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const memberships = await prisma.teamMember.findMany({
+      where: { userId: authReq.user.id },
+      include: {
+        team: {
+          include: {
+            projects: {
+              include: {
+                _count: { select: { driveFiles: true, driveFolders: true } }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const projects: any[] = [];
+    memberships.forEach(m => {
+      m.team.projects.forEach(p => {
+        projects.push({
+          id: p.id,
+          title: p.title,
+          teamName: m.team.name,
+          filesCount: p._count.driveFiles,
+          foldersCount: p._count.driveFolders
+        });
+      });
+    });
+
+    res.json({ success: true, projects });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// GET /api/drive/files — list files (optional ?projectId=...)
+router.get('/files', async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const requestedProjectId = req.query.projectId as string | undefined;
+
+    const memberships = await prisma.teamMember.findMany({
+      where: { userId: authReq.user.id },
+      select: { teamId: true }
+    });
+    const teamIds = memberships.map(m => m.teamId);
+
+    const userProjects = await prisma.project.findMany({
+      where: { teamId: { in: teamIds } },
+      select: { id: true, title: true }
+    });
+    const allowedProjectIds = userProjects.map(p => p.id);
+
+    const targetProjectIds = requestedProjectId
+      ? allowedProjectIds.filter(id => id === requestedProjectId)
+      : allowedProjectIds;
+
+    const files = await prisma.driveFile.findMany({
+      where: { projectId: { in: targetProjectIds } },
+      include: {
+        uploadedBy: { select: { name: true, avatarUrl: true } },
+        project: { select: { id: true, title: true } }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100
+    });
+
+    res.json({ success: true, count: files.length, files });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // GET /api/drive/:projectId — list folders and root-level files
 router.get('/:projectId', async (req: Request, res: Response) => {
   try {

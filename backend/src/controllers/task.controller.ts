@@ -297,6 +297,43 @@ export const updateSubtask = async (req: Request, res: Response) => {
   }
 };
 
+export const deleteSubtask = async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { subtaskId } = req.params;
+
+    const subtask = await prisma.subtask.findUnique({
+      where: { id: subtaskId },
+      include: { task: { include: { project: true } } }
+    });
+
+    if (!subtask) {
+      return res.status(404).json({ error: 'Subtask not found.' });
+    }
+
+    const membership = await prisma.teamMember.findUnique({
+      where: { userId_teamId: { userId: authReq.user.id, teamId: subtask.task.project.teamId } }
+    });
+
+    if (!membership) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
+    await prisma.subtask.delete({
+      where: { id: subtaskId }
+    });
+
+    res.json({ message: 'Subtask deleted successfully' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
 // Comments
 export const addTaskComment = async (req: Request, res: Response) => {
   try {
@@ -359,3 +396,62 @@ export const addTaskComment = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 };
+
+export const getMyTasks = async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const tasks = await prisma.task.findMany({
+      where: {
+        assigneeId: authReq.user.id
+      },
+      include: {
+        project: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            team: {
+              select: {
+                id: true,
+                name: true
+              }
+            }
+          }
+        },
+        milestone: {
+          select: {
+            id: true,
+            title: true
+          }
+        },
+        oldSubtasks: true,
+        assignee: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true
+          }
+        },
+        _count: {
+          select: {
+            comments: true
+          }
+        }
+      },
+      orderBy: [
+        { status: 'asc' },
+        { dueDate: 'asc' }
+      ]
+    });
+
+    res.json({ tasks });
+  } catch (error) {
+    console.error('[getMyTasks ERROR]', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+

@@ -261,3 +261,73 @@ export const createMeeting = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 };
+
+export const getUpcomingDeadlines = async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const now = new Date();
+    const memberships = await prisma.teamMember.findMany({
+      where: { userId: authReq.user.id },
+      include: { team: { include: { projects: { select: { id: true, title: true } } } } }
+    });
+
+    const projectIds: string[] = [];
+    const projectMap: Record<string, string> = {};
+    memberships.forEach(m => {
+      m.team.projects.forEach(p => {
+        projectIds.push(p.id);
+        projectMap[p.id] = p.title;
+      });
+    });
+
+    const [tasks, milestones] = await Promise.all([
+      prisma.task.findMany({
+        where: {
+          projectId: { in: projectIds },
+          dueDate: { gte: now },
+          status: { not: 'COMPLETED' }
+        },
+        orderBy: { dueDate: 'asc' },
+        take: 10,
+        select: { id: true, title: true, dueDate: true, priority: true, status: true, projectId: true }
+      }),
+      prisma.milestone.findMany({
+        where: {
+          projectId: { in: projectIds },
+          dueDate: { gte: now },
+          status: { not: 'COMPLETED' }
+        },
+        orderBy: { dueDate: 'asc' },
+        take: 10,
+        select: { id: true, title: true, dueDate: true, status: true, projectId: true }
+      })
+    ]);
+
+    const deadlines = [
+      ...tasks.map(t => ({
+        id: t.id,
+        type: 'task',
+        title: t.title,
+        dueDate: t.dueDate,
+        priority: t.priority,
+        status: t.status,
+        projectTitle: projectMap[t.projectId] || 'Project'
+      })),
+      ...milestones.map(m => ({
+        id: m.id,
+        type: 'milestone',
+        title: m.title,
+        dueDate: m.dueDate,
+        status: m.status,
+        projectTitle: projectMap[m.projectId] || 'Project'
+      }))
+    ].sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime());
+
+    res.json({ deadlines });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+};

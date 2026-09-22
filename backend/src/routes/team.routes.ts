@@ -6,6 +6,8 @@ const router = Router();
 
 router.use(authenticateJWT);
 
+router.get('/', getMyTeams);
+router.post('/', createTeam);
 router.post('/create', createTeam);
 router.post('/join', joinTeam);
 router.get('/my-teams', getMyTeams);

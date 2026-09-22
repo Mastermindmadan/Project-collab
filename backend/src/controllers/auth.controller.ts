@@ -42,7 +42,12 @@ const parseSkills = (skills: any) => {
 };
 
 const purgeExpiredTokens = async () => {
-  await prisma.token.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+  try {
+    await prisma.token.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+  } catch (e) {
+    // Non-fatal background cleanup — never fail authentication requests on cleanup
+    console.warn('[AUTH] purgeExpiredTokens (non-fatal):', e);
+  }
 };
 
 const storeRefreshToken = async (userId: string, plainRefreshToken: string) => {

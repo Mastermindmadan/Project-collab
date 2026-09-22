@@ -176,4 +176,95 @@ router.post('/sprint-summary', geminiRateLimiter, async (req, res) => {
   }
 });
 
+// 6. AI PROJECT MONITORING & ANALYSIS API
+router.post('/projects/:projectId/analyze', geminiRateLimiter, async (req, res) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { projectId } = req.params;
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        tasks: {
+          include: {
+            assignee: { select: { name: true } },
+          },
+        },
+        milestones: true,
+        gitAnalytics: true,
+        team: {
+          include: {
+            members: {
+              include: {
+                user: { select: { id: true, name: true, role: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found.' });
+    }
+
+    // Verify user is member of project team
+    const isMember = project.team?.members.some((m) => m.userId === authReq.user!.id);
+    if (!isMember) {
+      return res.status(403).json({ error: 'You do not have access to this project.' });
+    }
+
+    const ownerMember = project.team?.members.find((m) => m.role === 'OWNER');
+    const ownerName = ownerMember?.user.name || 'Project Owner';
+    const teamName = project.team?.name || 'Development Team';
+    const commitsCount = project.gitAnalytics?.commitsCount || 0;
+
+    const analysis = await AIService.analyzeProjectMonitoring(
+      {
+        title: project.title,
+        description: project.description || '',
+        teamName,
+        ownerName,
+        githubRepo: project.githubRepo,
+        commitsCount,
+        tasks: project.tasks.map((t) => ({
+          title: t.title,
+          status: t.status,
+          priority: t.priority,
+          dueDate: t.dueDate,
+          assigneeName: t.assignee?.name || null,
+        })),
+        milestones: project.milestones.map((m) => ({
+          title: m.title,
+          status: m.status,
+          dueDate: m.dueDate,
+        })),
+        activeMembersCount: project.team?.members.length || 1,
+      },
+      authReq.user.id,
+      projectId
+    );
+
+    // Also update project healthScore in database if it changed
+    if (analysis.healthScore !== project.healthScore) {
+      await prisma.project.update({
+        where: { id: projectId },
+        data: {
+          healthScore: analysis.healthScore,
+          status: analysis.healthStatus,
+        },
+      });
+    }
+
+    res.json({ analysis });
+  } catch (error: any) {
+    console.error('Project Monitoring Route Error:', error.message);
+    if (error.message?.startsWith('RATE_LIMIT_EXCEEDED')) {
+      return res.status(429).json({ error: error.message });
+    }
+    res.status(503).json({ success: false, message: error.message || 'AI service temporarily unavailable' });
+  }
+});
+
 export default router;

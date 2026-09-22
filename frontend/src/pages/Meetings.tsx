@@ -32,6 +32,7 @@ function guessType(title: string) {
 export default function Meetings() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
+  const [filterProjectId, setFilterProjectId] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [showNewModal, setShowNewModal] = useState(false);
   const [error, setError] = useState('');
@@ -69,7 +70,11 @@ export default function Meetings() {
       });
 
       setProjects(allProjects);
-      if (allProjects.length > 0 && !newProjectId) {
+      const urlProjectId = new URLSearchParams(window.location.search).get('project');
+      if (urlProjectId && allProjects.some((p) => p.id === urlProjectId)) {
+        setNewProjectId(urlProjectId);
+        setFilterProjectId(urlProjectId);
+      } else if (allProjects.length > 0 && !newProjectId) {
         setNewProjectId(allProjects[0].id);
       }
 
@@ -121,11 +126,14 @@ export default function Meetings() {
   };
 
   const now = new Date();
-  const today = meetings.filter((m) => {
+  const filteredMeetings = meetings.filter(
+    (m) => filterProjectId === 'all' || m.projectId === filterProjectId
+  );
+  const today = filteredMeetings.filter((m) => {
     const d = new Date(m.dateTime);
     return d.toDateString() === now.toDateString();
   });
-  const upcoming = meetings.filter((m) => {
+  const upcoming = filteredMeetings.filter((m) => {
     const d = new Date(m.dateTime);
     return d > now && d.toDateString() !== now.toDateString();
   });
@@ -142,21 +150,51 @@ export default function Meetings() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div>
           <p className="text-slate-400 text-sm mb-1 flex items-center gap-1.5">
             <Calendar className="w-3.5 h-3.5" /> Meeting Scheduler
           </p>
           <h1 className="text-3xl font-extrabold text-white tracking-tight">Meetings</h1>
-          <p className="text-slate-500 text-sm mt-1">{meetings.length} scheduled · {today.length} today</p>
+          <p className="text-slate-500 text-sm mt-1">{filteredMeetings.length} scheduled · {today.length} today</p>
         </div>
         <button
           onClick={() => setShowNewModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold rounded-xl transition-all"
+          className="flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold rounded-xl transition-all self-start"
         >
           <Plus className="w-4 h-4" /> Schedule Meeting
         </button>
       </div>
+
+      {/* Project Filter Toolbar */}
+      {projects.length > 1 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+          <span className="text-xs text-slate-500 font-medium mr-1 flex-shrink-0">Filter Project:</span>
+          <button
+            onClick={() => setFilterProjectId('all')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+              filterProjectId === 'all'
+                ? 'bg-primary text-primary-foreground shadow'
+                : 'bg-slate-900/60 text-slate-400 hover:text-white border border-slate-800'
+            }`}
+          >
+            All Projects ({meetings.length})
+          </button>
+          {projects.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setFilterProjectId(p.id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+                filterProjectId === p.id
+                  ? 'bg-primary text-primary-foreground shadow'
+                  : 'bg-slate-900/60 text-slate-400 hover:text-white border border-slate-800'
+              }`}
+            >
+              {p.title}
+            </button>
+          ))}
+        </div>
+      )}
 
       {error && (
         <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm flex items-center gap-2">
