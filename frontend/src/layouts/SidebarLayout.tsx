@@ -7,7 +7,7 @@ import {
   Settings as SettingsIcon, Search, ShieldAlert, Menu, X,
   CheckSquare, BarChart3, CalendarDays, Video,
   ArrowRight, Loader2, Mail, Lock,
-  Github, Brain, FileBarChart, HardDrive, Rocket
+  Github, Brain, FileBarChart, HardDrive, Rocket, Sparkles
 } from 'lucide-react';
 import GlobalSearch from '../components/GlobalSearch';
 import AccountSwitcher from '../components/AccountSwitcher';
@@ -76,7 +76,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
 
   const getNavPath = (basePath: string) => {
     if (!activeProjectId) return basePath;
-    const projectScopedPaths = ['/tasks', '/github', '/ai-pm', '/deploy', '/reports', '/meetings', '/drive', '/analytics'];
+    const projectScopedPaths = ['/tasks', '/github', '/ai-pm', '/ai', '/deploy', '/reports', '/meetings', '/drive', '/analytics'];
     if (projectScopedPaths.includes(basePath)) {
       return `${basePath}?project=${activeProjectId}`;
     }
@@ -281,8 +281,9 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
     {
       label: 'Dev & Intelligence',
       items: [
-        { name: 'GitHub Activity', path: '/github', icon: Github },
+        { name: 'AI Planner', path: '/ai', icon: Sparkles },
         { name: 'Project Intelligence', path: '/ai-pm', icon: Brain },
+        { name: 'GitHub Activity', path: '/github', icon: Github },
         { name: 'Drive & Documents', path: '/drive', icon: HardDrive },
         { name: 'Deployments', path: '/deploy', icon: Rocket },
       ],
@@ -484,7 +485,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
                     ? `${location.pathname}${location.search}` === item.path
                     : location.pathname === item.path ||
                       (item.path === '/drive' && location.pathname === '/documents') ||
-                      (item.path === '/ai-pm' && (location.pathname === '/ai' || location.pathname === '/intelligence'));
+                      (item.path === '/ai-pm' && (location.pathname === '/ai-pm' || location.pathname === '/intelligence'));
                   const linkTarget = item.path.includes('?') ? item.path : getNavPath(item.path);
                   return (
                     <Link key={item.name} to={linkTarget} onClick={() => setMobileOpen(false)}

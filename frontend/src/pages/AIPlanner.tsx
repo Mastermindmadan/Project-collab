@@ -205,14 +205,24 @@ export default function AIPlanner() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div>
-        <p className="text-muted-foreground text-sm mb-1 flex items-center gap-1.5 font-medium">
-          <Zap className="w-4 h-4 text-primary" /> ProjectCollab AI Intelligence Suite
-        </p>
-        <h1 className="text-3xl font-extrabold text-foreground tracking-tight">AI Planning & Risk Analytics</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Powered by ProjectCollab AI Engine · Real-time task planning, requirement analysis, risk detection, and sprint intelligence
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <p className="text-muted-foreground text-sm mb-1 flex items-center gap-1.5 font-medium">
+            <Zap className="w-4 h-4 text-primary" /> ProjectCollab AI Intelligence Suite
+          </p>
+          <h1 className="text-3xl font-extrabold text-foreground tracking-tight">AI Planning & Risk Analytics</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Powered by ProjectCollab AI Engine · Real-time task planning, requirement analysis, risk detection, and sprint intelligence
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/ai-pm')}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 font-semibold text-xs shadow-md transition-all self-start sm:self-center"
+        >
+          <Brain className="w-4 h-4 text-purple-400" />
+          <span>Open AI Project Manager</span>
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {/* Tool Selector Cards */}
